@@ -87,8 +87,12 @@ Si ves todo esto, ¡perfecto!
 
 ## Parte 3 — Crear el proyecto de la aplicación en Xcode
 
-El código de la "lógica" (cálculos, mediciones, custodia) ya está hecho. Lo que
-falta es crear el "contenedor" de Xcode que junta todo en una app instalable.
+El código de la "lógica" (cálculos, mediciones, custodia) ya está escrito, pero
+**no todo funciona correctamente todavía**: hay errores conocidos y documentados
+en `fixes.md` (en la raíz del proyecto), incluyendo uno que afecta directamente
+la verificación de la cadena de custodia (ver Parte 9.3 de esta guía). Revisa ese
+archivo con el equipo técnico antes de usar la app en un caso real. Lo que falta
+además es crear el "contenedor" de Xcode que junta todo en una app instalable.
 
 ### Paso 3.1 — Crear un proyecto nuevo
 
@@ -294,6 +298,13 @@ Si quieres comprobar que el expediente no fue manipulado:
 ```
 python3 /Users/tu_usuario/Documentos/arqueoLidar/tools/verify_chain.py "/ruta/a/Findings/FND-..."
 ```
+
+> **Importante:** al momento de escribir esta guía, `verify_chain.py` tiene un
+> error conocido (ver `fixes.md`) que hace que reporte `FALLO` incluso en
+> expedientes íntegros, sin ninguna manipulación. Si ves `FALLO` al correr este
+> comando, **no asumas que el expediente está dañado** — es un problema de la
+> herramienta de verificación, no necesariamente del expediente. Consulta con
+> el equipo técnico antes de descartar nada.
 
 Si dice `VERIFICACIÓN: OK`, el expediente es íntegro.
 
