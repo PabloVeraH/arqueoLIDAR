@@ -1,5 +1,6 @@
 import Foundation
 import Domain
+import Mesh
 
 // ═══════════════════════════════════════════════════════════════════════════════
 // F9 — FindingStore. Implementación de FindingStoring.
@@ -62,7 +63,17 @@ public actor FindingStore: FindingStoring {
         guard fileManager().fileExists(atPath: meshPath.path) else {
             throw .scanNotFound(scanID)
         }
-        throw .bundleCorrupt("Carga de PLY no implementada en Persistence; usar Export/PLYWriter en fase 12")
+        let data: Data
+        do {
+            data = try Data(contentsOf: meshPath)
+        } catch {
+            throw .bundleCorrupt("No se pudo leer mesh.ply: \(error.localizedDescription)")
+        }
+        do {
+            return try PLYCodec.decode(data)
+        } catch {
+            throw .bundleCorrupt("mesh.ply corrupto o con formato no reconocido: \(error)")
+        }
     }
 
     public func listFindings() async throws(StoreError) -> [FindingSummary] {

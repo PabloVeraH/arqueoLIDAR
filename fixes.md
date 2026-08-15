@@ -757,6 +757,15 @@ cobertura para esta ruta).
 
 ### `FindingStore.loadMesh` no está implementado — no existe ningún lector de PLY en todo el proyecto
 
+**✅ Corregido.** Se extrajo el formato binario PLY (antes duplicado solo como escritor dentro
+de `Export/PLYWriter`) a `Mesh/PLYCodec` — módulo que solo depende de `Domain`, así que tanto
+`Persistence` como `Export` pueden depender de él sin crear el ciclo que impedía que
+`Persistence` leyera lo que ella misma escribe. `BundleWriter.writeMesh` (que también era un
+placeholder que no escribía nada) y `FindingStore.loadMesh` ahora usan `PLYCodec` para
+escribir/leer `mesh.ply`; `PLYWriter` delega en el mismo códec en vez de duplicar la
+serialización. Se agregaron tests de round-trip (`PersistenceTests`) y del códec en sí
+(`PLYCodecTests`, incluyendo casos de error: datos corruptos, cuerpo truncado).
+
 **Severidad:** Bloqueante
 
 `Sources/Persistence/FindingStore.swift:58-66`:

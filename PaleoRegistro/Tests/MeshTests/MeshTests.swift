@@ -436,3 +436,43 @@ struct MeshCloserTests {
         _ = disk2
     }
 }
+
+// ─── PLYCodec ──────────────────────────────────────────────────────────────
+
+@Suite("F4/F9 Mesh: PLYCodec (round-trip binario)")
+struct PLYCodecTests {
+
+    @Test("encode → decode reproduce la malla original exactamente")
+    func roundTrip() throws {
+        let mesh = SyntheticMeshes.cube(center: SIMD3(0.1, -0.2, 0.3), size: 0.5, divisions: 2)
+        let data = PLYCodec.encode(mesh)
+        let decoded = try PLYCodec.decode(data)
+        #expect(decoded == mesh)
+    }
+
+    @Test("encode es byte-determinista")
+    func byteDeterministic() throws {
+        let mesh = SyntheticMeshes.cube(center: .zero, size: 1.0, divisions: 1)
+        let a = PLYCodec.encode(mesh)
+        let b = PLYCodec.encode(mesh)
+        #expect(a == b)
+    }
+
+    @Test("decode rechaza datos sin cabecera PLY válida")
+    func rejectsGarbage() throws {
+        let garbage = Data("no soy un PLY".utf8)
+        #expect(throws: MeshError.self) {
+            _ = try PLYCodec.decode(garbage)
+        }
+    }
+
+    @Test("decode rechaza tamaño de cuerpo inconsistente con la cabecera")
+    func rejectsTruncatedBody() throws {
+        let mesh = SyntheticMeshes.cube(center: .zero, size: 1.0, divisions: 1)
+        var data = PLYCodec.encode(mesh)
+        data.removeLast(4) // trunca un vértice a la mitad
+        #expect(throws: MeshError.self) {
+            _ = try PLYCodec.decode(data)
+        }
+    }
+}

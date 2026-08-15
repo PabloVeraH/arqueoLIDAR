@@ -1,5 +1,6 @@
 import Foundation
 import Domain
+import Mesh
 
 // ═══════════════════════════════════════════════════════════════════════════════
 // F9 — BundleWriter. Layout de bundle en disco, escritura atómica.
@@ -66,13 +67,14 @@ public struct BundleWriter: Sendable {
         return scanDir
     }
 
-    /// Escribe la malla en un scan. El PLY real lo produce `Export/PLYWriter`
-    /// (F12); Persistence no puede depender de Export (dependencia inversa),
-    /// así que la app inyecta el escritor concreto en la fase de integración.
+    /// Escribe la malla en un scan como `mesh.ply` (vía `Mesh/PLYCodec`, la
+    /// misma codificación que usa `Export/PLYWriter` para el export público —
+    /// una sola fuente de verdad para el formato, para que
+    /// `FindingStore.loadMesh` pueda leer exactamente lo que aquí se escribe).
     public func writeMesh(_ mesh: Mesh, to scanDir: URL) throws(StoreError) {
-        // Placeholder: la app escribe mesh.ply vía Export/PLYWriter y lo coloca
-        // en scanDir. Aquí solo garantizamos que el directorio exista.
         try ensureDirectory(scanDir)
+        let path = scanDir.appendingPathComponent("mesh.ply")
+        try atomicWrite(data: PLYCodec.encode(mesh), to: path)
     }
 
     /// Escribe measurements.json en un scan.

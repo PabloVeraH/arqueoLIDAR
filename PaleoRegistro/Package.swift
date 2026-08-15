@@ -49,11 +49,13 @@ let package = Package(
         // F10
         .target(name: "Custody", dependencies: ["Domain", "Persistence", crypto]),
 
-        // F9
-        .target(name: "Persistence", dependencies: ["Domain"]),
+        // F9 — depende de Mesh para poder leer de vuelta el PLY que ella
+        // misma escribe (FindingStore.loadMesh, vía PLYCodec) sin crear una
+        // dependencia circular con Export (que sí depende de Persistence).
+        .target(name: "Persistence", dependencies: ["Domain", "Mesh"]),
 
         // F12
-        .target(name: "Export", dependencies: ["Domain", "Geo", "Custody", "Persistence"]),
+        .target(name: "Export", dependencies: ["Domain", "Mesh", "Geo", "Custody", "Persistence"]),
 
         // ─── Tests ───
         .testTarget(name: "DomainTests", dependencies: ["Domain"]),

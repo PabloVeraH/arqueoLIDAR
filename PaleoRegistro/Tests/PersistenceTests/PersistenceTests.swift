@@ -390,6 +390,42 @@ struct FindingStoreTests {
         #expect(list[0].scanCount == 1)
     }
 
+    @Test("appendScan + loadMesh: la malla se recupera intacta desde disco")
+    func appendScanThenLoadMeshRoundTrips() async throws {
+        let base = tempDir()
+        defer { cleanup(base) }
+
+        let store = FindingStore(baseURL: base)
+        let author = AuthorIdentity(name: "X", role: "Y", institution: "Z")
+        let finding = Finding(siteID: UUID(), title: "Round Trip Test", expeditionCode: "R1", author: author)
+        _ = try await store.createFinding(finding)
+
+        let mesh = Mesh(
+            vertices: [SIMD3(0, 0, 0), SIMD3(1, 0, 0), SIMD3(0, 1, 0), SIMD3(0.3, 0.6, -0.9)],
+            indices: [0, 1, 2, 1, 3, 2]
+        )
+        let scan = ScanSession(findingID: finding.findingID, purpose: .baseline)
+        _ = try await store.appendScan(scan, mesh: mesh, to: finding.findingID)
+
+        let loaded = try await store.loadMesh(scanID: scan.scanID, findingID: finding.findingID)
+        #expect(loaded == mesh, "La malla cargada debe ser idéntica a la escrita")
+    }
+
+    @Test("loadMesh de un scan inexistente produce error")
+    func loadMeshNonexistentScan() async throws {
+        let base = tempDir()
+        defer { cleanup(base) }
+
+        let store = FindingStore(baseURL: base)
+        let author = AuthorIdentity(name: "X", role: "Y", institution: "Z")
+        let finding = Finding(siteID: UUID(), title: "T", expeditionCode: "E", author: author)
+        _ = try await store.createFinding(finding)
+
+        await #expect(throws: StoreError.self) {
+            _ = try await store.loadMesh(scanID: UUID(), findingID: finding.findingID)
+        }
+    }
+
     @Test("appendScan a finding inexistente produce error")
     func appendScanToNonexistentFinding() async throws {
         let base = tempDir()
