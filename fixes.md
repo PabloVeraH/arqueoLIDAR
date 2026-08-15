@@ -531,6 +531,13 @@ manipulación aunque el bug de arriba se corrija.
 
 ### `DiffEngine.computeVolumeChange` proyecta sobre el par de ejes equivocado para planos horizontales — el volumen ganado/perdido sale sistemáticamente ~0 en el caso más común
 
+**✅ Corregido.** Se reemplazó el booleano `useXY` (que además solo cubría 2 de los 3 casos
+posibles — el caso normal ≈ X quedaba mal proyectado en silencio igual que el caso Y
+original) por una selección explícita del eje fuera-de-plano (`ReferenceAxis`) derivada del
+mismo componente dominante que ya calculaba `dominantPlaneNormal`, con una función
+`gridKeyAndHeight` que cubre los tres ejes (X, Y, Z) de forma simétrica. *"Diff reporta
+volumen ganado y perdido por separado"* pasa en verde.
+
 **Severidad:** Bloqueante
 
 `Sources/Registration/DiffEngine.swift:277-278`:

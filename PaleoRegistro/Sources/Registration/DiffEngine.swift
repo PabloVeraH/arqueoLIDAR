@@ -259,6 +259,32 @@ public struct DiffEngine: MeshDifferencing, Sendable {
         return clusters
     }
 
+    /// Eje fuera-de-plano de una superficie de referencia: el componente de su
+    /// normal con mayor magnitud. Los otros dos ejes forman el plano de la
+    /// grilla de rasterización. Cubre los tres casos posibles (suelo con
+    /// normal ≈ Y, pared con normal ≈ Z o ≈ X) — antes solo se distinguían
+    /// dos casos con un booleano, y el tercero (normal ≈ X) quedaba mal
+    /// proyectado en silencio igual que el caso Y original.
+    private enum ReferenceAxis { case x, y, z }
+
+    private func dominantAxis(of normal: SIMD3<Float>) -> ReferenceAxis {
+        let a = SIMD3<Float>(abs(normal.x), abs(normal.y), abs(normal.z))
+        if a.x >= a.y && a.x >= a.z { return .x }
+        if a.y >= a.z { return .y }
+        return .z
+    }
+
+    /// Coordenadas de grilla (los dos ejes en el plano) y "altura" (el eje
+    /// fuera de plano) de un punto, dado el eje de referencia de la
+    /// superficie contra la que se mide el cambio.
+    private func gridKeyAndHeight(_ v: SIMD3<Float>, axis: ReferenceAxis, cellSize: Float) -> (key: SIMD2<Int>, height: Float) {
+        switch axis {
+        case .x: return (SIMD2(Int(floor(v.y / cellSize)), Int(floor(v.z / cellSize))), v.x)
+        case .y: return (SIMD2(Int(floor(v.x / cellSize)), Int(floor(v.z / cellSize))), v.y)
+        case .z: return (SIMD2(Int(floor(v.x / cellSize)), Int(floor(v.y / cellSize))), v.z)
+        }
+    }
+
     /// Rasteriza ambas mallas a una grilla común y calcula volumen ganado/perdido.
     private func computeVolumeChange(
         baseline: Mesh,
@@ -267,29 +293,23 @@ public struct DiffEngine: MeshDifferencing, Sendable {
         threshold: Float
     ) -> (lost: Double, gained: Double) {
 
-        // Simplificación: proyectar sobre plano XY (horizontal) o XZ.
-        // Para muros verticales se recomienda cambiar el plano de proyección.
-        // Aquí usamos el plano dominante de la baseline.
-
+        // Proyecta sobre el plano perpendicular a la normal dominante de la
+        // baseline: suelo/montículo (normal ≈ Y) se rasteriza sobre (x,z) con
+        // altura y; pared vertical (normal ≈ Z o ≈ X) se rasteriza sobre el
+        // plano correspondiente con la normal como altura.
         let normal = dominantPlaneNormal(baseline.vertices)
-        let useXY = abs(normal.y) > 0.5
+        let axis = dominantAxis(of: normal)
 
         var gridBaseline: [SIMD2<Int>: Float] = [:]
         var gridCurrent: [SIMD2<Int>: Float] = [:]
 
         for v in baseline.vertices {
-            let key = useXY
-                ? SIMD2(Int(floor(v.x / cellSize)), Int(floor(v.y / cellSize)))
-                : SIMD2(Int(floor(v.x / cellSize)), Int(floor(v.z / cellSize)))
-            let h = useXY ? v.z : v.y
+            let (key, h) = gridKeyAndHeight(v, axis: axis, cellSize: cellSize)
             gridBaseline[key] = max(gridBaseline[key] ?? -.infinity, h)
         }
 
         for v in current {
-            let key = useXY
-                ? SIMD2(Int(floor(v.x / cellSize)), Int(floor(v.y / cellSize)))
-                : SIMD2(Int(floor(v.x / cellSize)), Int(floor(v.z / cellSize)))
-            let h = useXY ? v.z : v.y
+            let (key, h) = gridKeyAndHeight(v, axis: axis, cellSize: cellSize)
             gridCurrent[key] = max(gridCurrent[key] ?? -.infinity, h)
         }
 
