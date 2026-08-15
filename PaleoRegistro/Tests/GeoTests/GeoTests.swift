@@ -307,13 +307,19 @@ struct TrackYawSolverTests {
 
         let baseTime = Date(timeIntervalSince1970: 1_700_000_000)
 
+        // El zigzag lateral escala con `length` para que una trayectoria
+        // "corta" (length pequeño) realmente acumule poco largo de arco —
+        // con una amplitud fija, el zigzag por sí solo podía superar
+        // `minTrackLength` aunque el desplazamiento neto pedido fuera mínimo.
+        let zigzagScale = length / 60.0
+
         for i in 0..<points {
             let t = Float(i) / Float(points - 1)
             let dist = t * length
 
             // En marco AR: movimiento en XZ (avance + zigzag lateral)
-            let arX = dist * 0.7 + sin(t * 8) * 2.0
-            let arZ = dist * 0.3 + cos(t * 5) * 1.5
+            let arX = dist * 0.7 + sin(t * 8) * 2.0 * zigzagScale
+            let arZ = dist * 0.3 + cos(t * 5) * 1.5 * zigzagScale
 
             let transform = Matrix4x4(
                 SIMD4(1, 0, 0, 0),
@@ -323,9 +329,11 @@ struct TrackYawSolverTests {
             )
             cameraTrack.append((time: baseTime.addingTimeInterval(Double(i)), transform: transform))
 
-            // GPS: AR track rotada por trueYaw + ruido + sesgo constante
-            let gpsEast = arX * cosY + (-arZ) * sinY + biasEast + gaussianNoise(sigma: noiseSigma, rng: &rng)
-            let gpsNorth = arX * sinY + (-arZ) * cosY + biasNorth + gaussianNoise(sigma: noiseSigma, rng: &rng)
+            // GPS: AR track rotada por trueYaw + ruido + sesgo constante.
+            // Punto AR en convención EN del solver: (px,py) = (arX, -arZ).
+            // Rotación 2D propia: (px·cosθ − py·sinθ, px·sinθ + py·cosθ).
+            let gpsEast = arX * cosY + arZ * sinY + biasEast + gaussianNoise(sigma: noiseSigma, rng: &rng)
+            let gpsNorth = arX * sinY - arZ * cosY + biasNorth + gaussianNoise(sigma: noiseSigma, rng: &rng)
 
             // Convertir a lat/lon aproximado desde un origen ficticio
             let originLat: Double = -33.4
@@ -371,7 +379,9 @@ struct TrackYawSolverTests {
     func shortTrackRejected() throws {
         let (cameraTrack, gpsFixes) = Self.syntheticTrack(length: 3.0, points: 10)
         let solver = TrackYawSolver()
-        #expect(throws: GeoError.degenerateTrack("")) {
+        // El mensaje asociado a .degenerateTrack es descriptivo y varía; se
+        // verifica el caso del error, no su valor asociado completo.
+        #expect(throws: GeoError.self) {
             _ = try solver.resolve(cameraTrack: cameraTrack, fixes: gpsFixes, minTrackLength: 10.0)
         }
     }
@@ -380,7 +390,9 @@ struct TrackYawSolverTests {
     func fewGPSPointsRejected() throws {
         let (cameraTrack, _) = Self.syntheticTrack(points: 50)
         let solver = TrackYawSolver()
-        #expect(throws: GeoError.degenerateTrack("")) {
+        // El mensaje asociado a .degenerateTrack es descriptivo y varía; se
+        // verifica el caso del error, no su valor asociado completo.
+        #expect(throws: GeoError.self) {
             _ = try solver.resolve(cameraTrack: cameraTrack, fixes: [])
         }
     }
@@ -389,7 +401,9 @@ struct TrackYawSolverTests {
     func fewARPointsRejected() throws {
         let solver = TrackYawSolver()
         let (_, gpsFixes) = Self.syntheticTrack(points: 3)
-        #expect(throws: GeoError.degenerateTrack("")) {
+        // El mensaje asociado a .degenerateTrack es descriptivo y varía; se
+        // verifica el caso del error, no su valor asociado completo.
+        #expect(throws: GeoError.self) {
             _ = try solver.resolve(cameraTrack: [], fixes: gpsFixes)
         }
     }

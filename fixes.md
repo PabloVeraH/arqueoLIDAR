@@ -293,6 +293,14 @@ lo cual es contrario a la intención del diseño: la fijación única *sí* pas�
 
 ### `TrackYawSolver` (producción) parece correcto; los tests que lo cubren están rotos por el propio fixture
 
+**✅ Corregido (en el test, no en producción).** Se arregló la matriz de "rotación" del
+generador (`gpsEast = arX·cosθ + arZ·sinθ`, `gpsNorth = arX·sinθ − arZ·cosθ` — rotación 2D
+propia real), se escaló el zigzag con `length` para que una trayectoria "corta" acumule
+realmente poco largo de arco, y se reemplazó `#expect(throws: GeoError.degenerateTrack(""))`
+por `#expect(throws: GeoError.self)` en los tres casos que comparaban por igualdad exacta
+contra un mensaje que nunca podía coincidir. Los 4 tests de `TrackYawSolverTests` pasan en
+verde.
+
 **Severidad:** Alta (calidad de tests) — no se encontró bug en el código de producción
 
 Los 4 tests de `TrackYawSolverTests` fallan, pero **no por un defecto en
