@@ -19,30 +19,41 @@ struct UTMConverterTests {
         let lat: Double; let lon: Double; let easting: Double; let northing: Double; let zone: Int
     }
 
-    /// Huso 18S: Santiago (Cerro San Cristóbal) ~ (350 000 E, 6 300 000 N).
-    /// Punto de control derivado de coordenadas IGM publicadas.
+    /// Huso 18S (-78°..-72°). Puntos en el sector occidental del huso, dentro
+    /// de territorio/mar chileno. E/N calculados con `pyproj` (EPSG:32718) —
+    /// el mismo cruce que exige el plan — y verificados además con
+    /// `tools/check_utm.py`.
+    ///
+    /// Nota: los tres puntos que ocupaban este lugar antes tenían longitudes
+    /// entre -69° y -70.7°, que caen en el huso 19 (-72°..-66°), no en el 18
+    /// (-78°..-72°) — el propio `UTMConverter` los clasificaba correctamente
+    /// como zona 19, lo que hacía fallar `utm.zone == cp.zone` sin que hubiera
+    /// ningún error real en el conversor.
     static let zone18Points: [ControlPoint] = [
-        ControlPoint(lat: -33.42536, lon: -70.63340, easting: 348_118.7, northing: 6_300_560.8, zone: 18),
-        ControlPoint(lat: -33.45000, lon: -70.66667, easting: 345_000.0, northing: 6_297_810.0, zone: 18),
-        ControlPoint(lat: -33.00000, lon: -69.00000, easting: 500_000.0, northing: 6_347_410.0, zone: 18),
+        ControlPoint(lat: -33.42536, lon: -73.50000, easting: 639_453.8321, northing: 6_300_550.3071, zone: 18),
+        ControlPoint(lat: -27.00000, lon: -75.00000, easting: 500_000.0000, northing: 7_013_564.7574, zone: 18),
+        ControlPoint(lat: -45.00000, lon: -74.00000, easting: 578_815.3029, northing: 5_016_563.2317, zone: 18),
     ]
 
     /// Huso 19S: Punta Arenas (~380 000 E, 4 100 000 N).
     static let zone19Points: [ControlPoint] = [
-        ControlPoint(lat: -53.16000, lon: -70.91667, easting: 372_000.0, northing: 4_107_760.0, zone: 19),
-        ControlPoint(lat: -53.00000, lon: -68.00000, easting: 567_500.0, northing: 4_125_000.0, zone: 19),
-        ControlPoint(lat: -52.50000, lon: -71.50000, easting: 330_000.0, northing: 4_181_000.0, zone: 19),
+        ControlPoint(lat: -53.16000, lon: -70.91667, easting: 371_854.2814, northing: 4_108_214.9013, zone: 19),
+        ControlPoint(lat: -53.00000, lon: -68.00000, easting: 567_109.4354, northing: 4_127_261.7386, zone: 19),
+        ControlPoint(lat: -52.50000, lon: -71.50000, easting: 330_306.2303, northing: 4_180_410.0708, zone: 19),
     ]
 
     /// Huso 12S: Isla de Pascua (~650 000 E, 7 000 000 N).
     static let zone12Points: [ControlPoint] = [
-        ControlPoint(lat: -27.11667, lon: -109.36667, easting: 661_000.0, northing: 7_000_000.0, zone: 12),
-        ControlPoint(lat: -27.15000, lon: -109.43333, easting: 654_500.0, northing: 6_996_300.0, zone: 12),
+        ControlPoint(lat: -27.11667, lon: -109.36667, easting: 661_896.4774, northing: 6_999_590.3797, zone: 12),
+        ControlPoint(lat: -27.15000, lon: -109.43333, easting: 655_242.0569, northing: 6_995_982.0301, zone: 12),
     ]
 
-    /// Tolerancia para comparación con puntos de control: 1 m (los puntos no tienen
-    /// precisión geodésica publicada oficial — son aproximaciones de IGM y OpenStreetMap).
-    static let controlPointTolerance: Double = 5.0 // m — tolerancia holgada porque las fuentes no son geodésicas
+    /// Tolerancia para comparación con puntos de control: 1 mm, tal como exige
+    /// el plan (§3, F8). Los valores E/N de arriba son los que produce
+    /// `pyproj` (una implementación independiente del método de Krüger) para
+    /// cada `(lat,lon)` — no aproximaciones de mapa, así que la tolerancia
+    /// puede ser la que pide el criterio de aceptación real.
+    static let controlPointTolerance: Double = 0.001 // m
 
     @Test("UTM: puntos de control huso 18S dentro de tolerancia", arguments: zone18Points)
     func utmZone18Control(_ cp: ControlPoint) throws {

@@ -198,6 +198,11 @@ de precisión sub-milimétrica que el propio plan fija para el `UTMConverter` (�
 
 ### El test de "puntos de control publicados" usa datos de fixture incorrectos, no revela un bug real de proyección directa
 
+**✅ Corregido.** Se reemplazaron los 3 puntos "18S" (que en realidad eran huso 19)
+por puntos genuinamente en el huso 18 (-78°..-72°), y se recalcularon los 8 puntos con
+`pyproj` a precisión completa (no redondeados a metros). La tolerancia se bajó de 5 m a
+1 mm, tal como exige el plan. Los 3 tests de puntos de control pasan en verde.
+
 **Severidad:** Media
 
 `Tests/GeoTests/GeoTests.swift:24-28`, los tres puntos etiquetados como huso **18S**
