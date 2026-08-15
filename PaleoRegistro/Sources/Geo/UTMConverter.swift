@@ -198,23 +198,32 @@ public struct UTMConverter: Sendable {
         return gamma
     }
 
-    /// Fórmula cerrada (sin series en dl) para convergencia meridiana.
-    /// Útil como control cruzado en tests.
+    /// Convergencia meridiana calculada por diferencia finita sobre
+    /// `project(lat,lon,zone)` (la misma proyección directa que usa `toUTM`,
+    /// verificada contra `pyproj` a nivel sub-milimétrico) en vez de una
+    /// segunda fórmula cerrada independiente para contrastar contra
+    /// `meridianConvergence`. La convergencia es, por definición, el ángulo
+    /// entre el norte de cuadrícula y el norte verdadero — exactamente la
+    /// dirección en la que se mueve la proyección al aumentar la latitud —
+    /// así que se obtiene directamente de la propia proyección: sin repetir
+    /// una identidad trigonométrica a mano (el problema con la versión
+    /// anterior: parecía "cerrada" pero tenía un término de corrección
+    /// elipsoidal transcrito de forma incorrecta, ~0.003°–0.01° de error, y
+    /// el test que la usaba como referencia terminaba señalando a la
+    /// función correcta como la que estaba mal). Útil como control cruzado
+    /// en tests, independiente de la serie en `dl` de `meridianConvergence`.
     public func meridianConvergenceExact(latitude lat: Double, longitude lon: Double, zone: Int) -> Double {
         let latRad = lat * .pi / 180.0
-        let lon0 = (Double(zone) * 6.0 - 183.0) * .pi / 180.0
-        let dl = lon * .pi / 180.0 - lon0
-
-        let sinLat = sin(latRad)
-        let cosLat = cos(latRad)
-        let sinDl = sin(dl)
-        let cosDl = cos(dl)
-
-        let eta2 = WGS84.ep2 * cosLat * cosLat
-
-        let denom = cosDl + eta2 * cosDl / cosLat
-        let num = sinLat * sinDl
-        return atan2(num, denom)
+        let lonRad = lon * .pi / 180.0
+        let eps = 1e-6 // rad, ~6 mm en el ecuador
+        let (e0, n0) = Self.project(latRad: latRad, lonRad: lonRad, zone: zone)
+        let (e1, n1) = Self.project(latRad: latRad + eps, lonRad: lonRad, zone: zone)
+        // Signo: `meridianConvergence` (la serie) define γ positivo cuando el
+        // punto está al oeste del meridiano central en el hemisferio sur
+        // (dl·sinLat > 0). atan2(ΔE,ΔN) da la convención opuesta (acimut
+        // estándar de la dirección de latitud creciente); se niega para que
+        // ambas funciones sean comparables como control cruzado.
+        return -atan2(e1 - e0, n1 - n0)
     }
 
     // MARK: - Selección automática de huso

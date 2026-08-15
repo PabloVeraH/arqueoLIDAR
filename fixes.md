@@ -227,6 +227,13 @@ milímetro como pide el plan.
 
 ### `meridianConvergenceExact` (usada como "verdad" en el test) es la función con el bug, no `meridianConvergence`
 
+**✅ Corregido.** En vez de reparar la identidad trigonométrica transcrita a mano (el mismo
+patrón de fragilidad que causó el bug de `toGeodetic`), se reescribió
+`meridianConvergenceExact` como diferencia finita sobre `project(...)` — la misma proyección
+directa ya verificada que usa `toUTM` — para obtener la convergencia geométricamente
+(la dirección en la que se mueve la proyección al aumentar la latitud), sin una segunda
+fórmula cerrada independiente que verificar a mano. Los 20 puntos del test pasan en verde.
+
 **Severidad:** Media
 
 El test *"Convergencia meridiana: fórmula de series vs fórmula cerrada"* falla en 18 de 20
@@ -249,6 +256,9 @@ introduciría una regresión real en la función que sí se usa en el pipeline d
 georreferenciación (`SiteFrameResolver` → `SiteFrame.meridianConvergence`, §2.E).
 
 ### "UTM: selección automática de huso correcta en bordes": el test se equivoca sobre dónde cae el límite 18S/19S y 19S/20S
+
+**✅ Corregido.** Se reescribieron las aserciones con la convención real (intervalo
+semiabierto, límite oeste inclusivo) y puntos sin ambigüedad.
 
 **Severidad:** Baja (calidad de test)
 
