@@ -78,7 +78,7 @@ public actor FindingStore: FindingStoring {
             return
         }
 
-        let decoder = JSONDecoder()
+        let decoder = CanonicalDateCoding.decoder()
         for dir in contents {
             let manifestPath = dir.appendingPathComponent("finding.json")
             guard let data = try? Data(contentsOf: manifestPath),

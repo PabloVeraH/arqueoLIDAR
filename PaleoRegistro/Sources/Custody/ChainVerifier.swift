@@ -42,7 +42,10 @@ public struct ChainVerifier: ChainVerifying {
         }
 
         // 2. Parsear sellos
-        let decoder = JSONDecoder()
+        // Debe usar el mismo formato que CanonicalJSONEncoder (Data en base64,
+        // Date en ISO 8601) — un JSONDecoder por defecto no puede leer lo que
+        // el propio encoder canónico escribió.
+        let decoder = CanonicalDateCoding.decoder()
         var seals: [SealRecord] = []
         for (i, line) in lines.enumerated() {
             guard let data = line.data(using: .utf8),
@@ -115,8 +118,11 @@ public struct ChainVerifier: ChainVerifying {
         }
 
         // 5. Verificar firma criptográfica de cada sello
+        // El payload usa milisegundos enteros (no el Double crudo de
+        // `timeIntervalSince1970`) — debe coincidir exactamente con la
+        // convención de `SealSigner.seal`, ver `CanonicalDateCoding`.
         for seal in seals {
-            let payloadString = "\(seal.rootHash)|\(seal.wallClock.timeIntervalSince1970)|\(seal.author.name)"
+            let payloadString = "\(seal.rootHash)|\(CanonicalDateCoding.millisecondsSince1970(seal.wallClock))|\(seal.author.name)"
             guard let payload = payloadString.data(using: .utf8) else {
                 errors.append(.invalidSeal("Payload no codificable en sello \(seal.index)"))
                 continue

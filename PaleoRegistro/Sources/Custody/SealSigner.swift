@@ -74,6 +74,17 @@ public struct SealSigner: Sendable {
         clock: Date = Date()
     ) async throws(CustodyError) -> SealRecord {
 
+        // `wallClock` se serializa como ISO 8601 con milisegundos (ver
+        // `CanonicalDateCoding`), así que se normaliza el reloj a esa misma
+        // precisión ANTES de firmar: firmar con precisión de `Double` completa
+        // y luego serializar con menos precisión haría que la firma dejara de
+        // verificar contra el sello ya escrito en disco. Firmar exactamente lo
+        // que se va a persistir es lo que garantiza que ambos coincidan
+        // siempre, sin depender de que el redondeo del formateador ISO 8601
+        // coincida bit a bit con el de aquí.
+        let clockMillis = CanonicalDateCoding.millisecondsSince1970(clock)
+        let clock = Date(timeIntervalSince1970: Double(clockMillis) / 1000.0)
+
         // 1. Manifiesto
         let manifest = try hasher.buildManifest(directoryAt: bundleURL)
 
@@ -93,8 +104,11 @@ public struct SealSigner: Sendable {
             prevHash = nil
         }
 
-        // 4. Payload a firmar: rootHash + timestamp + author
-        let payloadString = "\(rootHash)|\(clock.timeIntervalSince1970)|\(author.name)"
+        // 4. Payload a firmar: rootHash + timestamp (ms enteros, no Double) + author.
+        // Un entero de milisegundos evita cualquier ambigüedad de redondeo de
+        // punto flotante entre lo firmado y lo que se recupera al decodificar
+        // el sello desde chain.jsonl.
+        let payloadString = "\(rootHash)|\(clockMillis)|\(author.name)"
         let payload = payloadString.data(using: .utf8)!
 
         // 5. Firmar

@@ -125,7 +125,7 @@ struct SealSignerTests {
         #expect(seal.rootHash.count == 64)
 
         // Verificar que la firma es válida con la clave pública del sello
-        let payload = "\(seal.rootHash)|\(seal.wallClock.timeIntervalSince1970)|Dr. Test"
+        let payload = "\(seal.rootHash)|\(CanonicalDateCoding.millisecondsSince1970(seal.wallClock))|Dr. Test"
         let pubKey = try P256.Signing.PublicKey(derRepresentation: seal.publicKeyDER)
         let sig = try P256.Signing.ECDSASignature(derRepresentation: seal.signatureDER)
         let valid = pubKey.isValidSignature(sig, for: payload.data(using: .utf8)!)

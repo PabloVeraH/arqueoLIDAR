@@ -50,6 +50,68 @@ public struct CanonicalJSONEncoder: Sendable {
     }
 }
 
+// MARK: - Codificación/decodificación de fechas del JSON canónico
+
+/// Convención de fecha del JSON canónico: ISO 8601 UTC con milisegundos
+/// (`"2026-08-15T02:27:16.407Z"`), no `timeIntervalSinceReferenceDate`.
+/// Es la representación que cualquier lenguaje/herramienta puede leer sin
+/// conocer la convención de epoch de Foundation — necesaria porque el plan
+/// exige que `chain.jsonl`/`record.json` sean verificables "sin la app y sin
+/// Swift" (`tools/verify_chain.py`, `VERIFY.txt`).
+public enum CanonicalDateCoding {
+
+    /// `ISO8601DateFormatter` no es `Sendable` (mutable), así que se crea una
+    /// instancia nueva por llamada en vez de compartir estado global mutable
+    /// entre tareas — coherente con `SWIFT_STRICT_CONCURRENCY = complete`.
+    private static func makeFormatter() -> ISO8601DateFormatter {
+        let f = ISO8601DateFormatter()
+        f.formatOptions = [.withInternetDateTime, .withFractionalSeconds]
+        f.timeZone = TimeZone(identifier: "UTC")
+        return f
+    }
+
+    public static func string(from date: Date) -> String {
+        makeFormatter().string(from: date)
+    }
+
+    public static func date(from string: String) -> Date? {
+        makeFormatter().date(from: string)
+    }
+
+    /// Milisegundos desde el epoch Unix, redondeados — la precisión real que
+    /// sobrevive el viaje de ida y vuelta por el JSON canónico (ISO 8601 con
+    /// milisegundos). Cualquier código que firme o compare un `Date` que
+    /// también vaya a viajar por el JSON canónico (ej. el payload firmado de
+    /// un `SealRecord`) debe comparar por este valor, no por
+    /// `timeIntervalSince1970` en crudo: dos `Double` que representan el
+    /// mismo instante pero llegaron por rutas distintas (uno en memoria, otro
+    /// recién decodificado de texto) pueden diferir en los últimos bits sin
+    /// que este redondeo los distinga.
+    public static func millisecondsSince1970(_ date: Date) -> Int64 {
+        Int64((date.timeIntervalSince1970 * 1000).rounded())
+    }
+
+    /// `JSONDecoder` configurado para leer JSON producido por
+    /// `CanonicalJSONEncoder`: fechas ISO 8601 (en vez del `.deferredToDate`
+    /// por defecto). `Data` no necesita configuración: `JSONDecoder` espera
+    /// base64 por defecto, que es exactamente lo que emite el encoder canónico.
+    public static func decoder() -> JSONDecoder {
+        let decoder = JSONDecoder()
+        decoder.dateDecodingStrategy = .custom { decoder in
+            let container = try decoder.singleValueContainer()
+            let raw = try container.decode(String.self)
+            guard let date = CanonicalDateCoding.date(from: raw) else {
+                throw DecodingError.dataCorruptedError(
+                    in: container,
+                    debugDescription: "Fecha ISO 8601 inválida en JSON canónico: \(raw)"
+                )
+            }
+            return date
+        }
+        return decoder
+    }
+}
+
 // MARK: - AST
 
 private indirect enum _JSONValue {
@@ -154,6 +216,10 @@ private struct _CanonicalKeyedContainer<Key: CodingKey>: KeyedEncodingContainerP
     mutating func encode(_ value: UInt64, forKey key: Key) { box.entries.append((key.stringValue, .number(String(value)))) }
 
     mutating func encode<T: Encodable>(_ value: T, forKey key: Key) throws {
+        if let special = CanonicalFormat.encodeSpecialCased(value) {
+            box.entries.append((key.stringValue, special))
+            return
+        }
         let child = _CanonicalEncoder()
         try value.encode(to: child)
         if let f = child.failure { throw f }
@@ -209,6 +275,10 @@ private struct _CanonicalUnkeyedContainer: UnkeyedEncodingContainer {
     mutating func encode(_ value: UInt64) { box.items.append(.number(String(value))) }
 
     mutating func encode<T: Encodable>(_ value: T) throws {
+        if let special = CanonicalFormat.encodeSpecialCased(value) {
+            box.items.append(special)
+            return
+        }
         let child = _CanonicalEncoder()
         try value.encode(to: child)
         if let f = child.failure { throw f }
@@ -261,6 +331,10 @@ private struct _CanonicalSingleValueContainer: SingleValueEncodingContainer {
     func encode(_ value: UInt64) { encoder.root = .number(String(value)) }
 
     func encode<T: Encodable>(_ value: T) throws {
+        if let special = CanonicalFormat.encodeSpecialCased(value) {
+            encoder.root = special
+            return
+        }
         let child = _CanonicalEncoder()
         try value.encode(to: child)
         if let f = child.failure { throw f }
@@ -271,6 +345,28 @@ private struct _CanonicalSingleValueContainer: SingleValueEncodingContainer {
 // MARK: - Formato canónico de números (locale-independiente)
 
 private enum CanonicalFormat {
+
+    /// Casos especiales de `Encodable` que la conformidad sintetizada de
+    /// Foundation codificaría de forma no portable si se dejara caer al
+    /// mecanismo genérico de `_CanonicalEncoder`:
+    /// - `Data` por defecto se vuelve un array JSON de bytes (`[48,89,...]`),
+    ///   que `JSONDecoder` estándar no puede leer (espera base64).
+    /// - `Date` por defecto se vuelve un `Double` en
+    ///   `timeIntervalSinceReferenceDate` (epoch 2001), un número sin
+    ///   significado fuera de Foundation/Swift — inservible para un perito
+    ///   que revise `record.json`/`chain.jsonl` sin la app.
+    /// Ambos se normalizan a la representación que exige el plan para todo
+    /// artefacto legal: **texto, estándar, decodificable sin Swift**
+    /// (base64 para `Data`, ISO 8601 con milisegundos para `Date`).
+    static func encodeSpecialCased<T>(_ value: T) -> _JSONValue? {
+        if let data = value as? Data {
+            return .string(data.base64EncodedString())
+        }
+        if let date = value as? Date {
+            return .string(CanonicalDateCoding.string(from: date))
+        }
+        return nil
+    }
 
     /// Formatea un Double a string canónico, sin depender de la configuración
     /// regional del dispositivo. Usa la representación más corta que hace

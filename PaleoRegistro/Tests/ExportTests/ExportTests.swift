@@ -86,9 +86,9 @@ struct PLYWriterTests {
         #expect(FileManager.default.fileExists(atPath: result.recordURL.path))
         #expect(result.recordURL.path.hasSuffix(".record.json"))
 
-        // El sidecar debe ser JSON canónico decodificable
+        // El sidecar debe ser JSON canónico decodificable (fechas ISO 8601)
         let data = try Data(contentsOf: result.recordURL)
-        let sidecar = try JSONDecoder().decode(RecordSidecar.self, from: data)
+        let sidecar = try CanonicalDateCoding.decoder().decode(RecordSidecar.self, from: data)
         #expect(sidecar.schemaVersion == 1)
         #expect(sidecar.geo.utm?.epsg == 32719)
         #expect(!sidecar.disclaimer.isEmpty)

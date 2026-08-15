@@ -179,9 +179,10 @@ struct BundleWriterTests {
         #expect(fm.fileExists(atPath: dir.appendingPathComponent("seals").path))
         #expect(fm.fileExists(atPath: dir.appendingPathComponent("exports").path))
 
-        // El finding.json debe ser JSON canónico y decodificable
+        // El finding.json debe ser JSON canónico y decodificable (fechas ISO 8601,
+        // no el `.deferredToDate` por defecto de JSONDecoder)
         let data = try Data(contentsOf: dir.appendingPathComponent("finding.json"))
-        let decoded = try JSONDecoder().decode(Finding.self, from: data)
+        let decoded = try CanonicalDateCoding.decoder().decode(Finding.self, from: data)
         #expect(decoded.findingID == finding.findingID)
         #expect(decoded.title == "Hallazgo Test")
     }
