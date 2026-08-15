@@ -139,11 +139,21 @@ struct UTMConverterTests {
 
     @Test("UTM: selección automática de huso correcta en bordes")
     func utmZoneSelection() throws {
-        // Borde 18S/19S: lon = -72° es zona 18; -71.999° es zona 18; -72.001° es zona 18 (justo al borde)
-        let z18a = try converter.toUTM(latitude: -33, longitude: -71.999)
-        #expect(z18a.zone == 18)
-        let z19 = try converter.toUTM(latitude: -33, longitude: -66.0)
-        #expect(z19.zone == 19)
+        // Convención de zoneFrom (floor((lon+180)/6)+1): cada huso cubre
+        // [límite_oeste, límite_este) — el límite oeste es inclusivo, el
+        // este no. Huso 18 = [-78°, -72°); huso 19 = [-72°, -66°); huso 20
+        // empieza en -66°.
+        let z18 = try converter.toUTM(latitude: -33, longitude: -72.001) // dentro de 18
+        #expect(z18.zone == 18)
+        let z19a = try converter.toUTM(latitude: -33, longitude: -72.000) // borde: pertenece a 19
+        #expect(z19a.zone == 19)
+        let z19b = try converter.toUTM(latitude: -33, longitude: -66.001) // dentro de 19
+        #expect(z19b.zone == 19)
+        // Borde: -66.000° pertenece al huso 20 (no soportado, fuera de
+        // Chile/Rapa Nui) por la misma convención semiabierta.
+        #expect(throws: GeoError.unsupportedZone(20)) {
+            _ = try converter.toUTM(latitude: -33, longitude: -66.000)
+        }
         let z12 = try converter.toUTM(latitude: -27, longitude: -109.4)
         #expect(z12.zone == 12)
     }
