@@ -264,6 +264,10 @@ Dos aserciones de este test contradicen la propia fórmula estándar de selecci�
 
 ### `FixQualityGate`: una única fijación precisa se marca `.degraded` por un centinela mágico
 
+**✅ Corregido.** Se distingue explícitamente `sigma == nil` ("no hay datos suficientes para
+calcular dispersión") de "dispersión mala": con una sola fijación aceptada no hay nada que
+contradiga su propia precisión, así que ahora se acepta como `.good`.
+
 **Severidad:** Alta
 
 `Sources/Geo/FixQualityGate.swift:72`:

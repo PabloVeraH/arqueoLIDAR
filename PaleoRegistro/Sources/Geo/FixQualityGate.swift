@@ -69,7 +69,17 @@ public struct FixQualityGate: Sendable {
         if !accepted.isEmpty, let chosen = weightedMedian(fixes: accepted.map(\.fix)) {
             let sigma = horizontalDispersion(fixes: accepted.map(\.fix), median: chosen)
 
-            verdict.quality = (sigma ?? 999) < 15.0 ? .good : .degraded
+            // sigma == nil significa "no hay suficientes fijaciones para
+            // calcular dispersión" (una sola fijación aceptada), no
+            // "dispersión mala". Antes se conflaba con un centinela de 999 m,
+            // lo que marcaba .degraded cualquier escaneo con una única
+            // fijación buena. Con una sola fijación no hay nada que
+            // contradiga su propia precisión, así que se acepta como .good.
+            if let sigma {
+                verdict.quality = sigma < 15.0 ? .good : .degraded
+            } else {
+                verdict.quality = .good
+            }
             verdict.chosenFix = chosen
             verdict.horizontalSigma = sigma
         } else {
