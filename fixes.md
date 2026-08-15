@@ -145,6 +145,19 @@ más abajo).
 
 ### `UTMConverter.toGeodetic` (UTM → lat/lon) tiene un error real: falta dividir por el radio de curvatura meridiano
 
+**✅ Corregido.** Se arregló el `ρ1` faltante, pero al verificar con una sonda quedó un
+segundo error (no detectado antes) en la fórmula de longitud, con el mismo síntoma
+(error creciente con la distancia al meridiano central). En vez de perseguir un segundo
+bug en una serie cerrada independiente de 5 términos, se rediseñó `toGeodetic`: la serie de
+Snyder/Redfearn ahora solo da la **estimación inicial** (exacta sobre el meridiano central,
+cercana fuera de él), y un refinamiento Newton-Raphson la pule contra `project(lat,lon)` —
+la misma función de proyección directa que usa `toUTM`, ya verificada contra `pyproj` a nivel
+sub-milimétrico — hasta precisión de máquina. Esto hace el round-trip correcto por
+construcción: una sola fuente de verdad para la proyección (no dos fórmulas independientes
+que solo se verifican entre sí), y cualquier corrección futura a la proyección directa se
+propaga automáticamente a la inversa. *"UTM round-trip: 10 000 puntos..."* y *"UTM: grilla
+densa..."* pasan en verde (antes: 32 y 400 fallas respectivamente).
+
 **Severidad:** Bloqueante
 
 `Sources/Geo/UTMConverter.swift:140`:

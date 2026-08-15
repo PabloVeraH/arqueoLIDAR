@@ -40,9 +40,32 @@ public struct UTMConverter: Sendable {
 
         let latRad = lat * .pi / 180.0
         let lonRad = lon * .pi / 180.0
+        let (rawE, rawN) = Self.project(latRad: latRad, lonRad: lonRad, zone: zone)
+        let northing = isNorth ? rawN : rawN + 10_000_000.0
+
+        do {
+            return try UTMCoordinate(
+                easting: rawE,
+                northing: northing,
+                ellipsoidalHeight: height,
+                zone: zone,
+                isNorthernHemisphere: isNorth,
+                epsg: epsg,
+                datum: "WGS84"
+            )
+        } catch {
+            throw .invalidInput("Error al construir UTMCoordinate: \(error)")
+        }
+    }
+
+    /// Núcleo de la proyección directa (series de Krüger orden 8): lat/lon → (easting,
+    /// northing crudo, sin el corrimiento de +10 000 000 del hemisferio sur). Aislado
+    /// como función pura para que `toUTM` y el refinamiento Newton-Raphson de
+    /// `toGeodetic` (más abajo) usen exactamente la misma proyección — una sola
+    /// fuente de verdad, sin duplicar la fórmula.
+    private static func project(latRad: Double, lonRad: Double, zone: Int) -> (e: Double, n: Double) {
         let lon0 = (Double(zone) * 6.0 - 183.0) * .pi / 180.0
 
-        // Arco meridiano desde el ecuador hasta lat
         let m = meridionalArc(latRad)
 
         let sinLat = sin(latRad)
@@ -78,21 +101,7 @@ public struct UTMConverter: Sendable {
             * (61.0 - 58.0 * t + t2 + 600.0 * eta2 - 330.0 * WGS84.ep2) * dl6
 
         let rawN = WGS84.k0 * (n1 + n2 + n3 + n4)
-        let northing = isNorth ? rawN : rawN + 10_000_000.0
-
-        do {
-            return try UTMCoordinate(
-                easting: rawE,
-                northing: northing,
-                ellipsoidalHeight: height,
-                zone: zone,
-                isNorthernHemisphere: isNorth,
-                epsg: epsg,
-                datum: "WGS84"
-            )
-        } catch {
-            throw .invalidInput("Error al construir UTMCoordinate: \(error)")
-        }
+        return (e: rawE, n: rawN)
     }
 
     // MARK: - UTM → Geo
@@ -103,6 +112,10 @@ public struct UTMConverter: Sendable {
         let y = utm.isNorthernHemisphere ? utm.northing : utm.northing - 10_000_000.0
         let x = utm.easting - 500_000.0
 
+        // 1. Estimación inicial: latitud del pie de meridiano (fórmula cerrada
+        // de Snyder/Redfearn), sin corrección por `x`. Es exacta sobre el
+        // meridiano central y se degrada con la distancia a él — de sobra
+        // dentro de la cuenca de convergencia del refinamiento del paso 2.
         let m = y / WGS84.k0
         let mu = m / (WGS84.a * (1.0 - WGS84.e2 / 4.0 - 3.0 * WGS84.e4 / 64.0 - 5.0 * WGS84.e6 / 256.0))
 
@@ -111,49 +124,51 @@ public struct UTMConverter: Sendable {
         let e13 = e1 * e12
         let e14 = e12 * e12
 
-        let sin2mu = sin(2 * mu)
-        let sin4mu = sin(4 * mu)
-        let sin6mu = sin(6 * mu)
-        let sin8mu = sin(8 * mu)
-
         let phi1 = mu
-            + (3.0 * e1 / 2.0 - 27.0 * e13 / 32.0) * sin2mu
-            + (21.0 * e12 / 16.0 - 55.0 * e14 / 32.0) * sin4mu
-            + (151.0 * e13 / 96.0) * sin6mu
-            + (1097.0 * e14 / 512.0) * sin8mu
-
-        let sinPhi1 = sin(phi1)
-        let cosPhi1 = cos(phi1)
-        let tanPhi1 = tan(phi1)
-        let nu1 = WGS84.a / sqrt(1.0 - WGS84.e2 * sinPhi1 * sinPhi1)
-        let eta12 = WGS84.ep2 * cosPhi1 * cosPhi1
-
-        let t1 = tanPhi1 * tanPhi1
-        let t2 = t1 * t1
-
-        let xOverNu = x / nu1
-        let xOverNu2 = xOverNu * xOverNu
-        let xOverNu4 = xOverNu2 * xOverNu2
-        let xOverNu6 = xOverNu4 * xOverNu2
-
-        let lat = phi1
-            - (nu1 * tanPhi1 / (nu1 * 1.0)) * (
-                xOverNu2 / 2.0
-                - (5.0 + 3.0 * t1 + 10.0 * eta12 - 4.0 * eta12 * eta12 - 9.0 * WGS84.ep2) * xOverNu4 / 24.0
-                + (61.0 + 90.0 * t1 + 45.0 * t2 + 298.0 * eta12) * xOverNu6 / 720.0
-            )
+            + (3.0 * e1 / 2.0 - 27.0 * e13 / 32.0) * sin(2 * mu)
+            + (21.0 * e12 / 16.0 - 55.0 * e14 / 32.0) * sin(4 * mu)
+            + (151.0 * e13 / 96.0) * sin(6 * mu)
+            + (1097.0 * e14 / 512.0) * sin(8 * mu)
 
         let lon0 = (Double(utm.zone) * 6.0 - 183.0) * .pi / 180.0
-        let lon = lon0
-            + (xOverNu
-                - (1.0 + 2.0 * t1 + eta12) * xOverNu2 * xOverNu / 6.0
-                + (5.0 - 2.0 * eta12 + 28.0 * t1 - 3.0 * eta12 * eta12 + 8.0 * WGS84.ep2 + 24.0 * t2)
-                  * xOverNu4 * xOverNu / 120.0
-              ) / cosPhi1
+        let nu1 = WGS84.a / sqrt(1.0 - WGS84.e2 * sin(phi1) * sin(phi1))
+        var latRad = phi1
+        var lonRad = lon0 + x / (nu1 * cos(phi1))
+
+        // 2. Refinamiento Newton-Raphson sobre la proyección directa ya
+        // verificada (`Self.project`, la misma que usa `toUTM`): en vez de
+        // mantener una segunda serie cerrada e independiente para la
+        // inversa —dos fórmulas que pueden divergir sutilmente y quedar
+        // "verificadas" solo entre sí—, se resuelve numéricamente
+        // `project(lat,lon) == (easting, y)` hasta precisión de máquina.
+        // Esto hace que ida y vuelta sea exacta por construcción: cualquier
+        // corrección futura a `project` se propaga automáticamente a la
+        // inversa sin tener que re-derivar una serie en `dl` a mano.
+        let eps = 1e-6 // rad, ~6 mm en el ecuador — suficiente para la
+                        // derivada numérica sin ruido de cancelación en Double
+        for _ in 0..<8 {
+            let (e0, n0) = Self.project(latRad: latRad, lonRad: lonRad, zone: utm.zone)
+            let residualE = e0 - utm.easting
+            let residualN = n0 - y
+            if abs(residualE) < 1e-7 && abs(residualN) < 1e-7 { break }
+
+            let (eLat, nLat) = Self.project(latRad: latRad + eps, lonRad: lonRad, zone: utm.zone)
+            let (eLon, nLon) = Self.project(latRad: latRad, lonRad: lonRad + eps, zone: utm.zone)
+            let dEdLat = (eLat - e0) / eps, dNdLat = (nLat - n0) / eps
+            let dEdLon = (eLon - e0) / eps, dNdLon = (nLon - n0) / eps
+
+            let det = dEdLat * dNdLon - dEdLon * dNdLat
+            guard abs(det) > 1e-20 else { break }
+
+            let dLat = (-residualE * dNdLon + dEdLon * residualN) / det
+            let dLon = (-dEdLat * residualN + dNdLat * residualE) / det
+            latRad += dLat
+            lonRad += dLon
+        }
 
         return (
-            lat: lat * 180.0 / .pi,
-            lon: lon * 180.0 / .pi,
+            lat: latRad * 180.0 / .pi,
+            lon: lonRad * 180.0 / .pi,
             h: utm.ellipsoidalHeight
         )
     }
@@ -213,7 +228,7 @@ public struct UTMConverter: Sendable {
 
     // MARK: - Arco meridiano
 
-    private func meridionalArc(_ lat: Double) -> Double {
+    private static func meridionalArc(_ lat: Double) -> Double {
         let e2 = WGS84.e2
         let e4 = WGS84.e4
         let e6 = WGS84.e6
