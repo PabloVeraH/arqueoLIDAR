@@ -147,6 +147,11 @@ de cada módulo más abajo; este ítem registra el hecho agregado: **la afirmaci
 
 ### Placeholders `Stub.swift` de la Fase 1 no se limpiaron al completar cada módulo
 
+**✅ Corregido.** Se eliminaron los 6 `Sources/*/Stub.swift` y sus 6 `Tests/*/StubTests.swift`
+correspondientes (`Custody`, `Export`, `Geo`, `Persistence`, `Registration`, `Segmentation`).
+Ningún otro archivo referenciaba los tipos `*ModuleStub` (verificado por búsqueda en todo
+`Sources/`/`Tests/` antes de borrar). `swift build` y `swift test` (148/148) siguen en verde.
+
 **Severidad:** Baja
 
 `Sources/{Custody,Export,Geo,Persistence,Registration,Segmentation}/Stub.swift` (2 líneas
