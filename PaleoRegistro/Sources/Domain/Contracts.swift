@@ -219,6 +219,32 @@ public enum InitMethod: String, Sendable, Codable {
     case geodetic
 }
 
+/// Uno de los 6 grados de libertad del calce rígido, etiquetado por el eje
+/// donde domina la componente de un autovector del Hessiano punto-a-plano
+/// (ver `ICPAligner.computeConditionNumber`, fixes.md). El autovector real
+/// casi nunca es un eje puro — esta es una clasificación por componente
+/// dominante, pensada para que un informe pericial pueda decir "la
+/// traslación en X y la rotación en Z no quedaron restringidas por este
+/// calce" en vez de solo un número de condición sin explicación.
+public enum DegenerateAxis: String, Sendable, Codable, Equatable {
+    case translationX, translationY, translationZ
+    case rotationX, rotationY, rotationZ
+}
+
+/// Una dirección del espacio de 6 grados de libertad débilmente restringida
+/// por las correspondencias del calce — el eje dominante del autovector y
+/// el valor singular asociado (raíz del autovalor del Hessiano; pequeño =
+/// poco informativo, no necesariamente cero).
+public struct WeakDirection: Sendable, Codable, Equatable {
+    public var axis: DegenerateAxis
+    public var sigma: Float
+
+    public init(axis: DegenerateAxis, sigma: Float) {
+        self.axis = axis
+        self.sigma = sigma
+    }
+}
+
 public struct AlignmentResult: Sendable, Codable, Equatable {
     public var transform: Matrix4x4
     public var rmse: Float
@@ -227,6 +253,9 @@ public struct AlignmentResult: Sendable, Codable, Equatable {
     public var conditionNumber: Float
     public var isDegenerate: Bool
     public var initializationMethod: InitMethod
+    /// Direcciones del espacio de 6-DOF que dominan el número de condición
+    /// (ver `WeakDirection`). Vacío cuando `isDegenerate` es `false`.
+    public var weakDirections: [WeakDirection]
 
     public init(
         transform: Matrix4x4,
@@ -235,7 +264,8 @@ public struct AlignmentResult: Sendable, Codable, Equatable {
         iterations: Int,
         conditionNumber: Float,
         isDegenerate: Bool,
-        initializationMethod: InitMethod
+        initializationMethod: InitMethod,
+        weakDirections: [WeakDirection] = []
     ) {
         self.transform = transform
         self.rmse = rmse
@@ -244,6 +274,7 @@ public struct AlignmentResult: Sendable, Codable, Equatable {
         self.conditionNumber = conditionNumber
         self.isDegenerate = isDegenerate
         self.initializationMethod = initializationMethod
+        self.weakDirections = weakDirections
     }
 }
 

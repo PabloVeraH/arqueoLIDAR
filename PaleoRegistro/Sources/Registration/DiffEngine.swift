@@ -22,7 +22,7 @@ public struct DiffEngine: MeshDifferencing, Sendable {
             throw .invalidInput("Mallas vacías")
         }
         guard !alignment.isDegenerate else {
-            throw .degenerate(conditionNumber: alignment.conditionNumber)
+            throw .degenerate(conditionNumber: alignment.conditionNumber, weakDirections: alignment.weakDirections)
         }
 
         // Transformar la malla actual al marco de la baseline

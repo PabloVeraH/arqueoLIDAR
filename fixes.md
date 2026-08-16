@@ -11,16 +11,17 @@ Formato de cada hallazgo: **Título**, **Severidad** (`Bloqueante` / `Alta` / `M
 > **Estado actual:** todos los hallazgos de este documento (dentro del alcance de los 11
 > módulos SPM en `PaleoRegistro/Sources` y `tools/*.py`) están marcados **✅ Corregido** —
 > cada uno con su nota de resolución bajo la severidad original, sin borrar la descripción
-> del problema encontrado. `swift build` y `swift test` corren en verde (148/148). Dos
-> excepciones quedan documentadas **explícitamente como pendientes, no ocultas**: la
-> heurística de `ICPAligner.computeConditionNumber` (ver el hallazgo de `ICPAligner` en
-> `Registration/`) y la precisión de convergencia de `ICPAligner` frente al objetivo
-> aspiracional de <1 mm del plan (hoy ~0.20 m, una mejora sustancial sobre el estado
-> original no convergente, pero no al nivel del plan). La capa `App/` (Fases 0, 3, 13, 14,
-> 15 — Xcode, ARKit, UI) sigue completamente fuera de alcance: no existe proyecto Xcode y
-> no puede crearse ni probarse en este entorno Linux. El resumen ejecutivo de abajo describe
-> el estado **al momento de la auditoría original**, antes de los fixes; se conserva sin
-> editar como registro histórico de lo encontrado.
+> del problema encontrado. `swift build` y `swift test` corren en verde (153/153). Una
+> excepción queda documentada **explícitamente como pendiente, no oculta**: la precisión de
+> convergencia de `ICPAligner` frente al objetivo aspiracional de <1 mm del plan (hoy ~0.20 m,
+> una mejora sustancial sobre el estado original no convergente, pero no al nivel del plan).
+> `ICPAligner.computeConditionNumber` (antes también pendiente) ya usa el Hessiano
+> punto-a-plano real con normalización de escala y descomposición espectral en Double (ver el
+> hallazgo de `ICPAligner` en `Registration/`). La capa `App/` (Fases 0, 3, 13, 14, 15 —
+> Xcode, ARKit, UI) sigue completamente fuera de alcance: no existe proyecto Xcode y no puede
+> crearse ni probarse en este entorno Linux. El resumen ejecutivo de abajo describe el estado
+> **al momento de la auditoría original**, antes de los fixes; se conserva sin editar como
+> registro histórico de lo encontrado.
 
 ## Resumen ejecutivo
 
@@ -781,18 +782,44 @@ la iteración siguiente; y no se guardaba la mejor transformación vista, así q
 iteraciones que empeoran gradualmente podía arruinar un resultado que ya había convergido
 bien.
 
-**Lo que queda documentado como pendiente, no oculto:** `computeConditionNumber` sigue
-usando un heurístico de dispersión geométrica genérico (no el Hessiano punto-a-plano real)
-porque la versión con el Hessiano real, aunque detecta correctamente una pared plana como
-degenerada, sobre-marcaba como degenerada una escena con normales en varias direcciones (un
-cubo) bajo ciertas transformaciones — no se pudo aislar la causa exacta con confianza en el
-tiempo disponible. Los umbrales de `degeneracyConditionThreshold` en los tests que ejercitan
-este heurístico están calibrados contra su salida actual (por escena), no derivados
-físicamente. La precisión de convergencia de ICP en el test de "recupera transformación
-conocida" quedó verificada en ~0.20 m, no en el <1 mm que pide el plan — mejora sustancial
-sobre el bug original (0.92 m de error, o directamente sin converger), pero el residuo
-apunta a un problema de conditioning adicional (correspondencia por vecino más cercano entre
-caras de un cubo pequeño) que queda para una fase posterior de trabajo sobre F11.
+**✅ `computeConditionNumber` corregido — ahora usa el Hessiano punto-a-plano real.** El
+primer intento (documentado arriba como pendiente) sobre-marcaba escenas bien condicionadas
+(un cubo) como degeneradas. Causa raíz identificada (no solo "hacía falta más tiempo"):
+comparaba autovalores de `H = ΣJᵀJ` — que crecen como el cuadrado del número de condición de
+`J` — contra un umbral calibrado para el heurístico anterior, sin no-dimensionalizar la
+escala de los puntos (Gelfand, Ikemoto, Rusinkiewicz & Levoy, *"Geometrically Stable Sampling
+for the ICP Algorithm"*, 3DIM 2003, identifican exactamente esta combinación como necesaria).
+
+Fix: `H` se centra en el centroide de la muestra y se no-dimensionaliza por su escala RMS
+(bloque rotacional `p̂×n` y traslacional `n` quedan en la misma magnitud), se diagonaliza en
+`Double` (no `Float` — la sospecha de pérdida de precisión del intento anterior era
+razonable) vía un solver de Jacobi cíclico propio y puro Swift
+(`Registration/SymmetricEigenJacobi.swift`, sin Accelerate/LAPACK: `Registration` es un
+módulo puro protegido por `check_module_boundaries.sh`, y una implementación distinta por
+plataforma sería inaceptable en un proyecto donde este veredicto puede terminar en un informe
+pericial). El número de condición es ahora `σ_max/σ_min` (σ = raíz del autovalor, no el
+autovalor directo — evita reportar el cuadrado inflado). Verificado empíricamente: un plano
+mide `cond ≈ 1e7` (autovalores exactamente 0 en las 3 direcciones sin restringir) y un cubo
+bien condicionado mide `cond ≈ 2.5` — seis órdenes de magnitud de separación, sin necesidad
+de calibrar el umbral por escena (los `degeneracyConditionThreshold: 25.0` de los tests
+afectados se removieron; usan el valor por defecto, 1e6).
+
+Además, `AlignmentResult`/`RegistrationError.degenerate` ahora exponen `weakDirections:
+[WeakDirection]` — la dirección de 6-DOF de cada autovector débil (eje dominante + σ),
+derivada de los mismos autovectores que ya se calculaban para el número de condición.
+Verificado contra el resultado teórico clásico de degeneración de ICP sobre un plano (normal
+Y): las 3 direcciones sin restringir detectadas son exactamente `{translationX,
+translationZ, rotationY}`, con σ≈0 — lo que antes era un escalar sin explicación ahora puede
+decir, en un informe pericial, *qué* dirección del calce no quedó restringida. Cobertura
+nueva: `SymmetricEigenJacobiTests` (5 tests: reconstrucción `A·v=λv`, ortonormalidad de
+autovectores, conservación de traza, caso diagonal y bloque 2×2 con solución conocida a
+mano) y la aserción reforzada de `planarDegeneracyRejected`.
+
+La precisión de convergencia de ICP en el test de "recupera transformación conocida" sigue
+en ~0.20 m, no en el <1 mm que pide el plan — mejora sustancial sobre el bug original (0.92 m
+de error, o directamente sin converger), pero el residuo apunta a un problema de conditioning
+adicional (correspondencia por vecino más cercano entre caras de un cubo pequeño) que queda,
+esta sí, como pendiente documentada para una fase posterior de trabajo sobre F11.
 
 **Severidad:** Alta
 

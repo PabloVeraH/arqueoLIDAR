@@ -234,11 +234,14 @@ public struct ICPAligner: MeshRegistering, Sendable {
         }
 
         // Chequeo de degeneración
-        let conditionNumber = computeConditionNumber(transform: transform, target: effectiveTarget)
+        let (conditionNumber, weakDirections) = computeConditionNumber(
+            target: effectiveTarget,
+            threshold: options.degeneracyConditionThreshold
+        )
         let isDegenerate = conditionNumber > options.degeneracyConditionThreshold
 
         if isDegenerate {
-            throw .degenerate(conditionNumber: conditionNumber)
+            throw .degenerate(conditionNumber: conditionNumber, weakDirections: weakDirections)
         }
 
         // RMSE final
@@ -251,7 +254,8 @@ public struct ICPAligner: MeshRegistering, Sendable {
             iterations: options.maxIterations * options.voxelSizes.count,
             conditionNumber: conditionNumber,
             isDegenerate: isDegenerate,
-            initializationMethod: .geodetic
+            initializationMethod: .geodetic,
+            weakDirections: weakDirections
         )
     }
 
@@ -363,100 +367,119 @@ public struct ICPAligner: MeshRegistering, Sendable {
         return b
     }
 
-    private func computeConditionNumber(transform: Matrix4x4, target: Mesh) -> Float {
-        let r = transform.rotation3x3
-        let t = transform.translation
-
-        var cov = [Float](repeating: 0, count: 36)
+    /// Número de condición del Hessiano punto-a-plano real (H = Σ JᵀJ, J =
+    /// [n, p̂×n]) sobre una muestra del target, y las direcciones de 6-DOF
+    /// que lo dominan. Reemplaza el heurístico de dispersión geométrica que
+    /// vivió aquí antes (ver fixes.md, "computeConditionNumber"): ese primer
+    /// intento con el Hessiano real sobre-marcaba escenas bien
+    /// condicionadas (ej. un cubo con traslación acumulada grande) como
+    /// degeneradas. Causa raíz identificada (no solo "hacía falta más
+    /// tiempo"): comparaba autovalores de H = JᵀJ (que van como κ(J)²)
+    /// contra un umbral calibrado para el heurístico anterior, sin
+    /// normalizar la escala de los puntos — la combinación exacta que
+    /// Gelfand, Ikemoto, Rusinkiewicz & Levoy, "Geometrically Stable
+    /// Sampling for the ICP Algorithm" (3DIM 2003), identifican como
+    /// necesaria para que este número tenga sentido físico independiente
+    /// del tamaño de la escena. Este método corrige eso: centra en el
+    /// centroide, no-dimensionaliza por la escala RMS de la muestra, y
+    /// diagonaliza H en `Double` (no `Float` — la sospecha de pérdida de
+    /// precisión del intento anterior, documentada en el propio historial
+    /// de este archivo, era razonable) vía `SymmetricEigenSolver`.
+    ///
+    /// `threshold` es el mismo `options.degeneracyConditionThreshold` que
+    /// decide `isDegenerate`: una dirección se reporta como "débil" si su
+    /// propia razón σ_max/σ_i ya supera ese umbral por sí sola — así
+    /// `weakDirections` es exactamente el conjunto de direcciones
+    /// responsables de que `isDegenerate` sea cierto, sin un segundo umbral
+    /// mágico que mantener sincronizado.
+    private func computeConditionNumber(
+        target: Mesh,
+        threshold: Float
+    ) -> (conditionNumber: Float, weakDirections: [WeakDirection]) {
         let sample = voxelSubsample(target.vertices, cellSize: 0.1)
-        let n = Float(sample.count)
+        guard sample.count >= 6 else { return (1e7, []) }
 
-        guard n >= 6 else { return 1e7 }
+        // Normales reales si el target las trae (mismo criterio que
+        // `align()`); si no, se derivan de la topología del propio target
+        // — a diferencia del respaldo usado dentro del bucle de Gauss-
+        // Newton (que solo tiene la dirección fuente→destino por
+        // correspondencia disponible), aquí sí se dispone de la malla
+        // completa con sus caras.
+        let normals: [SIMD3<Float>]
+        if let real = target.normals, real.count == target.vertices.count {
+            normals = sample.map { real[$0.index] }
+        } else {
+            let computed = MeshOps().computeVertexNormals(target).map { vecNormalize($0) }
+            normals = sample.map { computed[$0.index] }
+        }
 
-        // NOTA (auditoría, ver fixes.md): se intentó reemplazar este
-        // heurístico por el Hessiano real punto-a-plano (producto externo
-        // de [normal, rp×normal] por punto, igual que JtJ en align()), que
-        // sí detecta correctamente una pared plana grande como degenerada
-        // — pero sobre-marca como degenerada una escena con normales en
-        // varias direcciones (ej. un cubo) cuando la transformación acumula
-        // una traslación grande, incluso evaluando las columnas
-        // rotacionales alrededor del centroide de la muestra en vez del
-        // origen del mundo. No se pudo aislar la causa raíz exacta (posible
-        // pérdida de precisión en el determinante 6×6 en Float) con
-        // confianza dentro del tiempo disponible, así que se mantiene este
-        // heurístico de dispersión geométrica — menos fiel al problema real
-        // de punto-a-plano, pero sin el falso positivo sobre escenas no
-        // degeneradas.
+        // Centroide de la muestra, en Double desde el principio.
+        var cx = 0.0, cy = 0.0, cz = 0.0
+        for (p, _) in sample { cx += Double(p.x); cy += Double(p.y); cz += Double(p.z) }
+        let count = Double(sample.count)
+        cx /= count; cy /= count; cz /= count
+
+        // Escala característica: RMS de la distancia al centroide. No-
+        // dimensionaliza el bloque rotacional del Hessiano (p̂×n, unidades
+        // de longitud) para que sea comparable en magnitud al bloque
+        // traslacional (n, siempre unitario) — sin esto, la misma escena
+        // geométrica a otra escala física (o la misma escena con más
+        // traslación acumulada) da un número de condición distinto por
+        // pura escala, no por una diferencia real de condicionamiento.
+        var sumSq = 0.0
         for (p, _) in sample {
-            let rp = r * p + t
-            let gx: SIMD3<Float> = SIMD3(1, 0, 0)
-            let gy: SIMD3<Float> = SIMD3(0, 1, 0)
-            let gz: SIMD3<Float> = SIMD3(0, 0, 1)
-            let gw: SIMD3<Float> = vecCross(rp, SIMD3(1,0,0))
-            let gv: SIMD3<Float> = vecCross(rp, SIMD3(0,1,0))
-            let gu: SIMD3<Float> = vecCross(rp, SIMD3(0,0,1))
+            let dx = Double(p.x) - cx, dy = Double(p.y) - cy, dz = Double(p.z) - cz
+            sumSq += dx * dx + dy * dy + dz * dz
+        }
+        let scale = (sumSq / count).squareRoot()
+        guard scale > 1e-9 else { return (1e7, []) } // toda la muestra en un punto: sin información
 
-            let J: [SIMD3<Float>] = [gx, gy, gz, gw, gv, gu]
+        // H = Σ JᵀJ, J = [n, p̂×n], p̂ = (p - centroide) / escala. Igual
+        // estructura que el Jacobiano punto-a-plano de `align()`.
+        var h = [[Double]](repeating: [Double](repeating: 0, count: 6), count: 6)
+        for (idx, (p, _)) in sample.enumerated() {
+            let n = normals[idx]
+            guard vecLength(n) > 1e-6 else { continue }
+            let px = (Double(p.x) - cx) / scale
+            let py = (Double(p.y) - cy) / scale
+            let pz = (Double(p.z) - cz) / scale
+            let nx = Double(n.x), ny = Double(n.y), nz = Double(n.z)
+            let cross = (px: py * nz - pz * ny, py: pz * nx - px * nz, pz: px * ny - py * nx)
+            let j = [nx, ny, nz, cross.px, cross.py, cross.pz]
             for r in 0..<6 {
                 for c in r..<6 {
-                    let val = vecDot(J[r], J[c]) / n
-                    cov[r * 6 + c] += val
+                    h[r][c] += j[r] * j[c]
                 }
             }
         }
+        for r in 0..<6 { for c in 0..<r { h[r][c] = h[c][r] } }
 
-        for r in 0..<6 {
-            for c in 0..<r {
-                cov[r * 6 + c] = cov[c * 6 + r]
+        let eig = SymmetricEigenSolver.solve(h)
+        // σ = √λ (H es semidefinida positiva por construcción; λ<0 solo por
+        // ruido numérico residual se trata como 0). σ vive en la misma
+        // escala que las filas de J, no la de H — evita reportar el
+        // cuadrado inflado directamente en el veredicto.
+        let sigmas = eig.values.map { $0 > 0 ? $0.squareRoot() : 0.0 }
+        guard let sigmaMax = sigmas.max(), sigmaMax > 1e-12 else { return (1e7, []) }
+        let sigmaMin = max(sigmas.min() ?? 0, 1e-300)
+        let conditionNumber = Float(min(sigmaMax / sigmaMin, 1e7))
+
+        let axes: [DegenerateAxis] = [.translationX, .translationY, .translationZ, .rotationX, .rotationY, .rotationZ]
+        var weak: [(axis: DegenerateAxis, sigma: Double, ratio: Double)] = []
+        for k in 0..<6 {
+            let ratio = sigmaMax / max(sigmas[k], 1e-300)
+            guard ratio > Double(threshold) else { continue }
+            var bestIdx = 0
+            var bestMag = abs(eig.vectors[0][k])
+            for i in 1..<6 {
+                let m = abs(eig.vectors[i][k])
+                if m > bestMag { bestMag = m; bestIdx = i }
             }
+            weak.append((axis: axes[bestIdx], sigma: sigmas[k], ratio: ratio))
         }
+        weak.sort { $0.ratio > $1.ratio }
 
-        // Traza como proxy de número de condición (más estable que eigenvalores)
-        var trace: Float = 0
-        for i in 0..<6 { trace += cov[i * 6 + i] }
-
-        // Si la traza es cero, la nube es completamente degenerada
-        guard trace > 1e-10 else { return 1e7 }
-
-        // Determinante como proxy de condicionalidad
-        // Para una nube plana, el determinante tiende a 0 → condición alta
-        let det = determinant6x6(cov)
-        let cond = abs(trace * trace / max(det, 1e-15))
-
-        return min(cond, 1e7)
-    }
-
-    private func determinant6x6(_ A: [Float]) -> Float {
-        // Usar eliminación gaussiana para calcular el determinante
-        var M = A
-        var det: Float = 1
-        for col in 0..<6 {
-            var pivot = abs(M[col * 6 + col])
-            var pivotRow = col
-            for row in (col+1)..<6 {
-                if abs(M[row * 6 + col]) > pivot {
-                    pivot = abs(M[row * 6 + col])
-                    pivotRow = row
-                }
-            }
-            if pivot < 1e-15 { return 0 }
-            if pivotRow != col {
-                det = -det
-                for c in 0..<6 {
-                    let tmp = M[col * 6 + c]
-                    M[col * 6 + c] = M[pivotRow * 6 + c]
-                    M[pivotRow * 6 + c] = tmp
-                }
-            }
-            det *= M[col * 6 + col]
-            for row in (col+1)..<6 {
-                let factor = M[row * 6 + col] / M[col * 6 + col]
-                for c in col..<6 {
-                    M[row * 6 + c] -= factor * M[col * 6 + c]
-                }
-            }
-        }
-        return det
+        return (conditionNumber, weak.map { WeakDirection(axis: $0.axis, sigma: Float($0.sigma)) })
     }
 
     private func computeRMSE(source: Mesh, target: Mesh, transform: Matrix4x4) -> Float {

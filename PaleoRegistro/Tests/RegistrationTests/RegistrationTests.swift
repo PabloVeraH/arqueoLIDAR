@@ -187,18 +187,18 @@ struct ICPAlignerTests {
         #expect(!result.isDegenerate)
     }
 
-    @Test("ICP: escena de un solo plano → DegeneracyCheck detecta y rechaza")
+    @Test("ICP: escena de un solo plano → DegeneracyCheck detecta y rechaza, con direcciones débiles correctas")
     func planarDegeneracyRejected() throws {
         let rawPlane = planeMesh(size: 3.0, divisions: 10)
-        // Normales reales, para cuando computeConditionNumber use el
-        // Hessiano punto-a-plano real en vez del heurístico de dispersión
-        // geométrica genérica actual (ver nota en
-        // Sources/Registration/ICPAligner.swift, computeConditionNumber, y
-        // fixes.md): se probó esa versión y detecta correctamente una pared
-        // plana, pero sobre-marca como degenerada una escena con normales
-        // en varias direcciones (ej. un cubo) — queda pendiente arreglar
-        // sin ese efecto secundario. Con el heurístico actual estas
-        // normales no se usan.
+        // Normales reales: computeConditionNumber ahora usa el Hessiano
+        // punto-a-plano real (fixes.md, "computeConditionNumber") — el
+        // primer intento de esto sobre-marcaba escenas bien condicionadas
+        // (ej. un cubo) como degeneradas; causa raíz identificada: comparar
+        // autovalores de H=JᵀJ (que van como κ(J)²) contra un umbral
+        // calibrado para el heurístico anterior, sin normalizar la escala
+        // de los puntos. Corregido con normalización de escala (Gelfand,
+        // Ikemoto, Rusinkiewicz & Levoy, 3DIM 2003) y descomposición
+        // espectral en Double.
         let planeNormals = MeshOps().computeVertexNormals(rawPlane).map { vecNormalize($0) }
         let plane = Mesh(vertices: rawPlane.vertices, indices: rawPlane.indices, normals: planeNormals)
 
@@ -214,22 +214,38 @@ struct ICPAlignerTests {
             normals: planeNormals.map { shiftTransform.rotation3x3 * $0 }
         )
 
-        // Umbral calibrado contra el heurístico de dispersión geométrica
-        // actual (mide ~30 para esta escena) — no un umbral físicamente
-        // derivado. Con el Hessiano punto-a-plano real (ver nota arriba)
-        // este número sería mucho más alto y no habría que ajustarlo a mano
-        // por escena.
-        let options = ICPOptions(degeneracyConditionThreshold: 25.0)
+        // Umbral por defecto (1e6): con el Hessiano real y escala
+        // normalizada, un plano mide ~1e7 (autovalores exactamente cero en
+        // las 3 direcciones no restringidas) y un cubo bien condicionado
+        // mide ~2.5 — separación de 6 órdenes de magnitud, sin necesidad de
+        // calibrar por escena como exigía el heurístico anterior.
+        let options = ICPOptions()
 
         do {
             _ = try aligner.align(source: shifted, target: plane, initial: Matrix4x4.identity, options: options)
             Issue.record("ICP sobre un plano debería ser rechazado por DegeneracyCheck")
         } catch {
-            guard let regErr = error as? RegistrationError, case .degenerate(let cond) = regErr else {
+            guard let regErr = error as? RegistrationError, case .degenerate(let cond, let weak) = regErr else {
                 Issue.record("Error inesperado: \(error)")
                 return
             }
-            #expect(cond > 0, "Número de condición debe ser positivo")
+            #expect(cond > 1e6, "Número de condición debe superar ampliamente el umbral")
+
+            // Resultado teórico clásico de degeneración de ICP sobre un
+            // único plano (normal ≈ Y): la traslación dentro del plano (X,
+            // Z) y la rotación alrededor de su propia normal (Y) no
+            // generan ningún residuo punto-a-plano — son las 3 direcciones
+            // sin restringir. La traslación fuera del plano (Y) y las
+            // rotaciones que lo inclinan (X, Z) sí generan residuo y quedan
+            // bien restringidas. Ver Gelfand et al. (3DIM 2003).
+            let weakAxes = Set(weak.map(\.axis))
+            #expect(
+                weakAxes == [.translationX, .translationZ, .rotationY],
+                "Direcciones débiles esperadas {translationX, translationZ, rotationY}, se obtuvo \(weakAxes)"
+            )
+            for w in weak {
+                #expect(w.sigma < 1e-3, "σ de una dirección degenerada real debería ser ~0, no \(w.sigma)")
+            }
         }
     }
 
@@ -297,13 +313,11 @@ struct DiffEngineTests {
         // La idea: sin máscara, la alineación intenta ajustar toda la pared,
         // absorbiendo el cambio del hueco. Con máscara, excluye la zona del hueco.
         // Verificar que DegeneracyCheck rechaza la pared plana (sin características).
-        // Umbral calibrado contra el heurístico actual de computeConditionNumber
-        // (mide ~33 para esta escena) — ver la nota extensa en
-        // "escena de un solo plano" más arriba y en fixes.md: el heurístico de
-        // dispersión geométrica no es un número de condición físicamente
-        // derivado, así que el umbral se ajusta por escena en vez de usar un
-        // valor universal.
-        let options = ICPOptions(degeneracyConditionThreshold: 25.0)
+        // Umbral por defecto (1e6): con el Hessiano punto-a-plano real y
+        // escala normalizada (fixes.md, "computeConditionNumber"), esta
+        // pared mide ~1e7 — igual que en "escena de un solo plano" más
+        // arriba, sin necesidad de un umbral ajustado por escena.
+        let options = ICPOptions()
         do {
             _ = try aligner.align(source: wallWithHole, target: wallBaseline,
                                    initial: Matrix4x4.identity, options: options)
