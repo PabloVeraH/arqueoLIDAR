@@ -68,6 +68,14 @@ compila y en su mayoría corre.
 
 ### Guarda de arquitectura (`check_module_boundaries.sh`) nunca se ejecuta
 
+**✅ Corregido.** Se agregó `Scripts/test_module_boundaries.sh`, que ejercita la guarda tal
+como exige el criterio de aceptación de F1: corre la guarda sobre el repo sin modificar
+(debe pasar), inyecta un `import SceneKit` temporal en `Domain/` (debe fallar), lo quita
+(debe volver a pasar) — con limpieza garantizada incluso si algo falla a mitad de camino.
+Se agregó `.github/workflows/ci.yml`, que corre en cada push/PR: la guarda, su auto-test,
+`swift build` y `swift test`, sobre la imagen oficial `swift:6.0`. Antes de esto no existía
+ningún CI ni ninguna prueba de que la guarda realmente detectara una violación.
+
 **Severidad:** Alta
 
 El plan (Fase 1, criterio de aceptación) exige: *"La guarda de arquitectura falla

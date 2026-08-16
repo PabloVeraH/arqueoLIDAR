@@ -1,0 +1,35 @@
+name: CI
+
+# F1 (plan_lidar_arqueologico.md, §3): la guarda de arquitectura y la suite
+# de tests deben correr en cada cambio. Antes de este workflow no había
+# ningún CI configurado — Scripts/check_module_boundaries.sh nunca se
+# ejecutaba automáticamente (fixes.md).
+
+on:
+  push:
+    branches: [main, dev]
+  pull_request:
+
+jobs:
+  build-and-test:
+    runs-on: ubuntu-latest
+    container: swift:6.0
+    defaults:
+      run:
+        working-directory: PaleoRegistro
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Guarda de arquitectura (import prohibidos en módulos puros)
+        working-directory: .
+        run: Scripts/check_module_boundaries.sh
+
+      - name: Auto-test de la guarda de arquitectura
+        working-directory: .
+        run: Scripts/test_module_boundaries.sh
+
+      - name: swift build
+        run: swift build
+
+      - name: swift test
+        run: swift test
