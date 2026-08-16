@@ -285,9 +285,14 @@ struct ManualSegmenterTests {
 
     @Test("Split divide vértices por un plano")
     func splitByPlane() throws {
+        // Vértices 5 y 6 llevan un x ligeramente negativo (en vez de 0)
+        // para no caer exactamente sobre el plano de corte {x=0}: un punto
+        // con x=0 no está a ningún lado, está sobre el plano, y split()
+        // lo asigna de forma determinista al lado dist>=0 — eso no es un
+        // bug de split(), pero hace el resultado del test ambiguo.
         let vertices: [SIMD3<Float>] = [
             SIMD3(0, 0, 0), SIMD3(1, 0, 0), SIMD3(0, 1, 0), SIMD3(0, 0, 1),
-            SIMD3(-1, 0, 0), SIMD3(0, -1, 0), SIMD3(0, 0, -1),
+            SIMD3(-1, 0, 0), SIMD3(-0.01, -1, 0), SIMD3(-0.01, 0, -1),
         ]
         let indices: [UInt32] = [0, 1, 2, 3, 4, 5, 6]
         let plane = try Plane(point: SIMD3(0, 0, 0), normal: SIMD3(1, 0, 0))
@@ -328,17 +333,19 @@ struct ManualSegmenterTests {
         let allIndices: [UInt32] = (0..<16).map { UInt32($0) }
         let plane = try Plane(point: SIMD3(0, 0, 0), normal: SIMD3(1, 0, 0))
 
-        let (a, b) = manual.split(vertices: vertices, indices: allIndices, by: plane)
-        #expect(!a.isEmpty, "Debe haber vértices en el lado A")
-        #expect(!b.isEmpty, "Debe haber vértices en el lado B")
-        #expect(Set(a).count + Set(b).count == 16, "Todos los vértices deben estar asignados")
+        // split() devuelve (compA, compB) con la convención compA = lado
+        // dist>=0 (positivo) — el Espécimen B (centrado en x=+0.15), no el A.
+        let (positiveSide, negativeSide) = manual.split(vertices: vertices, indices: allIndices, by: plane)
+        #expect(!positiveSide.isEmpty, "Debe haber vértices en el lado positivo")
+        #expect(!negativeSide.isEmpty, "Debe haber vértices en el lado negativo")
+        #expect(Set(positiveSide).count + Set(negativeSide).count == 16, "Todos los vértices deben estar asignados")
 
         // Recalcular OBBs
-        let boxA = manual.rebox(indices: a, vertices: vertices)
-        let boxB = manual.rebox(indices: b, vertices: vertices)
+        let specimenBBox = manual.rebox(indices: positiveSide, vertices: vertices)
+        let specimenABox = manual.rebox(indices: negativeSide, vertices: vertices)
 
         // Los centros deben estar cerca de los centros reales
-        #expect(abs(boxA.center.x - (-0.15)) < 0.05)
-        #expect(abs(boxB.center.x - 0.15) < 0.05)
+        #expect(abs(specimenABox.center.x - (-0.15)) < 0.05)
+        #expect(abs(specimenBBox.center.x - 0.15) < 0.05)
     }
 }

@@ -692,6 +692,9 @@ código de `Sources/Segmentation/ManualSegmenter.swift`:
 
 ### "Split divide vértices por un plano": el fixture pone dos vértices exactamente sobre el plano y el test espera que caigan al lado negativo
 
+**✅ Corregido.** Los vértices 5 y 6 llevan ahora un `x` ligeramente negativo (en vez de 0),
+así que quedan inequívocamente al lado negativo del plano en vez de sobre él.
+
 **Severidad:** Baja (calidad de test)
 
 El plano de corte es `point: (0,0,0), normal: (1,0,0)` — el plano `{x = 0}`. Los vértices 5
@@ -702,6 +705,10 @@ vértices 4,5,6"*) es factualmente incorrecto — los vértices 5 y 6 no tienen 
 el fixture (usar vértices con `x` estrictamente distinto de 0) resuelve el falso fallo.
 
 ### "Dos especímenes en contacto se pueden dividir manualmente en 2": el test intercambió a qué lado corresponde cada especimen
+
+**✅ Corregido.** Se renombraron las variables locales (`positiveSide`/`negativeSide` en vez
+de `a`/`b`) y se corrigió a qué especimen corresponde cada una, siguiendo la convención real
+de `split()`.
 
 **Severidad:** Baja (calidad de test)
 
