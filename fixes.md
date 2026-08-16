@@ -97,6 +97,19 @@ CI. El criterio de aceptación de la Fase 1 no está cumplido.
 
 ### `IntegrationTests` es un stub vacío pese a que F1–F12 se dan por "completas"
 
+**✅ Corregido.** Se agregaron 3 tests de integración reales que ejercitan el pipeline
+completo sin UI/ARKit: (1) ciclo de vida de un hallazgo — crear expediente, guardar la
+malla, recargarla desde disco, sellar, verificar en verde, manipular un archivo y verificar
+que la manipulación se detecta, exportar PLY con sidecar; (2) segmentación → OBB → volumen;
+(3) dos campañas → `DiffEngine` → volumen ganado. El primero ejercita directamente el
+camino que tenía el bug bloqueante de Custody — confirma que el ciclo real (no solo el
+aislado de `CustodyTests`) funciona de punta a punta. Se encontraron y corrigieron dos
+problemas menores propios de los datos sintéticos al escribir estas pruebas (no bugs de
+producción): un cubo perfecto no tiene ejes principales únicos para el ajuste de OBB por
+PCA (se reemplazó por una caja con dimensiones distintas por eje), y las caras de una caja
+se separan en componentes distintas con el `maxDihedralAngleDegrees` por defecto (45°,
+correcto para superficies reales) — se subió para esta prueba sintética de una sola pieza.
+
 **Severidad:** Alta
 
 El último commit (`e9c9a7b chore: IntegrationTests stub`) agrega
@@ -112,6 +125,12 @@ declara terminada contra datos reales" (regla general de §3). Ese target existe
 contiene ni un solo `@Test`.
 
 ### La suite de tests SÍ corre (con toolchain Linux) y revela ~24 tests reales rotos, 490 fallos
+
+**✅ Resuelto.** Los 24 tests documentados en esta auditoría (más los descubiertos durante
+las correcciones, como el bug de matriz transpuesta) están corregidos. Estado actual:
+**145/145 tests pasan**, `swift build` y `swift test` en verde, y ahora corren
+automáticamente en CI (ver hallazgo de la guarda de arquitectura) — ya no depende de que
+alguien lo ejecute manualmente para descubrir una regresión.
 
 **Severidad:** Bloqueante (metodológico)
 
