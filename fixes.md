@@ -564,6 +564,36 @@ formato) para lo que realmente es una excepción de tipo no manejada.
 
 ### Bug adicional (independiente) en `tools/verify_chain.py`: usa el epoch equivocado al reconstruir el payload firmado
 
+**✅ Corregido.** Ahora que `CanonicalJSONEncoder` serializa `Date` como ISO 8601 con
+milisegundos (ver el fix del hallazgo de arriba, "`ChainVerifier` no logra parsear ningún
+sello real"), `wallClock` en `chain.jsonl` ya no es un `Double` crudo — es un string
+(`"2026-08-16T13:47:21.404Z"`). Se agregó `iso8601_millis()` en `verify_chain.py`, que
+parsea ese string con `datetime.strptime(...).replace(tzinfo=timezone.utc)` y lo convierte a
+milisegundos desde el epoch Unix redondeados — el mismo entero que firma
+`SealSigner.swift` (`CanonicalDateCoding.millisecondsSince1970`), no el string ISO 8601 ni
+ningún epoch de punto flotante. El payload reconstruido pasó de
+`f"{rootHash}|{wallClock}|{author}"` (con `wallClock` como string ISO 8601 completo, que
+nunca coincidía con lo firmado) a usar los milisegundos recalculados.
+
+Verificando el fix de punta a punta con un bundle sellado real se encontró un **segundo bug,
+independiente, en la misma función**: `verify_signature()` parseaba `publicKeyDER` con
+`ec.EllipticCurvePublicKey.from_encoded_point(...)`, que espera un punto EC crudo sin
+encabezado (`0x04||X||Y`, 65 bytes) — pero `publicKeyDER` es la
+`SubjectPublicKeyInfo` DER completa que produce `P256.Signing.PublicKey.derRepresentation`
+de CryptoKit (~91 bytes). Esto lanzaba `ValueError: Unsupported elliptic curve point type`,
+capturado por el `except Exception: return False` genérico y reportado, engañosamente, como
+"firma inválida" — el mismo patrón de diagnóstico erróneo que el hallazgo anterior ya había
+detectado para el bug de `publicKeyDER` como lista de bytes. Se reemplazó por
+`load_der_public_key(pub_der)`, el parser correcto para SPKI DER.
+
+Verificado extremo a extremo: se generó un bundle sellado real (fuera de la suite de tests) y
+`verify_chain.py` reportó `VERIFICACIÓN: OK` sobre el bundle íntegro, y `FALLO` con el error
+correcto en tres escenarios de manipulación probados por separado (byte alterado en
+`mesh.ply`, manifiesto sustituido sin tocar archivos reales, y campo firmado alterado). Antes
+de este fix, `verify_chain.py` rechazaba **todo** bundle, íntegro o no, con el mismo mensaje
+de "firma inválida" — el bug documentado más abajo (`rootHash` nunca verificado) es el que
+demuestra el hueco adicional que quedaba una vez corregida la firma.
+
 **Severidad:** Alta — quedaría oculto hasta que se corrija el bug de arriba, y entonces
 rompería la verificación de firma igual
 
@@ -592,6 +622,21 @@ script Python está rota de forma independiente al bug de formato `Data` — arr
 arregla el otro.
 
 ### `tools/verify_chain.py` nunca verifica el `rootHash` del manifiesto — omite una categoría entera de manipulación que sí cubre la versión Swift
+
+**✅ Corregido.** `verify()` ahora llama a `compute_root_hash()` (que ya existía pero nunca se
+invocaba) para cada sello de la cadena, recalculando el SHA-256 del manifiesto que ese mismo
+sello declara y comparándolo contra `seal["rootHash"]`. Esto cierra el hueco donde un
+manifiesto sustituido (entradas con `bytes`/`sha256` distintos a los reales, o archivos
+agregados/quitados de la lista) podía pasar desapercibido mientras `rootHash` no cambiara —
+la firma solo cubre `rootHash`, no el manifiesto completo, así que sin este paso la firma
+seguía verificando sobre un `rootHash` que ya no correspondía a lo declarado.
+
+Probado con un caso concreto: se alteró el campo `bytes` de una entrada del manifiesto en un
+`chain.jsonl` real, sin tocar ni el archivo en disco ni `rootHash`. Antes de este fix, ningún
+paso de `verify()` lo detectaba (el archivo real seguía coincidiendo con su propia entrada
+del manifiesto declarado, y la firma seguía siendo válida sobre el `rootHash` sin cambiar).
+Con el fix, `verify_chain.py` reporta correctamente `Sello 0: rootHash no coincide con su
+propio manifiesto`.
 
 **Severidad:** Media
 
