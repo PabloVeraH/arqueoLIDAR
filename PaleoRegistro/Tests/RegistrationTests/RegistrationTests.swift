@@ -341,7 +341,15 @@ struct DiffEngineTests {
 
     @Test("Diff: 3 cambios separados producen exactamente 3 clusters")
     func threeSeparateChangesThreeClusters() throws {
-        let base = planeMesh(size: 2.0, divisions: 10)
+        // divisions: 10 (antes) da un espaciado de grilla de 0.2 m, más
+        // grueso que el radio de la zona de cambio (0.15 m) — el vértice más
+        // cercano a cualquier centro de zona quedaba a ~0.141 m, y con la
+        // atenuación 0.1·(1−dist/0.15) eso da una elevación real de solo
+        // ~5.7 mm, bajo el piso de ruido (20 mm) que el propio test declara.
+        // Con divisions: 30 (espaciado ~0.067 m) hay suficientes vértices
+        // dentro del radio de cada zona como para superar el umbral y el
+        // tamaño mínimo de cluster (≥5 vértices).
+        let base = planeMesh(size: 2.0, divisions: 30)
         var modVerts = base.vertices
 
         // Tres zonas de cambio (elevaciones localizadas)
@@ -369,8 +377,15 @@ struct DiffEngineTests {
             initializationMethod: .geodetic
         )
 
+        // cellSize también fija el tamaño de celda del hash espacial de
+        // clustering (hashCellSize = cellSize·3, en findChangeClusters).
+        // Con cellSize=0.15 (hashCellSize=0.45) el hueco real entre zonas
+        // (~0.7 m borde a borde) queda dentro del alcance de celdas
+        // "adyacentes" del union-find, y las 3 zonas terminan fusionadas en
+        // un solo cluster. cellSize=0.05 mantiene cada zona separada sin
+        // fragmentarla internamente.
         let diff = try diffEngine.diff(baseline: base, current: modified,
-                                        alignment: result, cellSize: 0.15)
+                                        alignment: result, cellSize: 0.05)
 
         #expect(diff.clusters.count == 3, "3 zonas de cambio deben producir 3 clusters, se encontraron \(diff.clusters.count)")
     }

@@ -614,6 +614,15 @@ fue corroborada de forma independiente por otra sesión que llegó al mismo diag
 
 ### `DiffEngine.findChangeClusters`: el test "3 cambios producen 3 clusters" falla por resolución de malla insuficiente en el fixture, no necesariamente por un bug de clustering
 
+**✅ Corregido.** Se subió `divisions` de 10 a 30 para que cada zona de cambio tenga
+suficientes vértices reales dentro de su radio. Al arreglar eso apareció una segunda causa,
+distinta: con `cellSize: 0.15` (el tamaño de celda del hash de clustering,
+`hashCellSize = cellSize·3 = 0.45`), el hueco real entre zonas (~0.7 m borde a borde) quedaba
+dentro del alcance de celdas "adyacentes" del union-find, fusionando las 3 zonas en un solo
+cluster (confirmado con una sonda: un único cluster de 36 vértices, con centroide exactamente
+en el promedio de los tres centros de zona). Se bajó `cellSize` a `0.05` para que cada zona
+quede separada del resto sin fragmentarse internamente. El test pasa en verde.
+
 **Severidad:** Media (calidad de test) — causa raíz distinta a la de arriba
 
 Se aisló con una sonda: para el test `threeSeparateChangesThreeClusters`
