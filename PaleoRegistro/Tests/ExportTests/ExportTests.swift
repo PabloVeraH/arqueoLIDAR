@@ -10,6 +10,23 @@ import Persistence
 // herramienta externa conceptual, byte-determinismo y sidecar obligatorio.
 // ═══════════════════════════════════════════════════════════════════════════════
 
+/// Busca una subcadena ASCII dentro de `Data` binaria arbitraria, sin
+/// intentar decodificar el archivo completo como texto (que falla — o peor,
+/// da un falso negativo silencioso — en cuanto el archivo tiene un solo byte
+/// no-ASCII, como cualquier archivo binario real con coordenadas de punto
+/// flotante).
+func containsASCIISubstring(_ substring: String, in data: Data) -> Bool {
+    let needle = Array(substring.utf8)
+    guard !needle.isEmpty, data.count >= needle.count else { return false }
+    let haystack = [UInt8](data)
+    for start in 0...(haystack.count - needle.count) {
+        if Array(haystack[start..<(start + needle.count)]) == needle {
+            return true
+        }
+    }
+    return false
+}
+
 func tempExportDir() -> URL {
     let dir = FileManager.default.temporaryDirectory
         .appendingPathComponent("export-\(UUID().uuidString.prefix(8))")
@@ -211,9 +228,14 @@ struct LASWriterTests {
         #expect(data[24] == 1) // major
         #expect(data[25] == 4) // minor
 
-        // WKT debe estar en el archivo
-        let content = String(data: data, encoding: .ascii) ?? ""
-        #expect(content.contains("WGS 84") || content.contains("UTM zone"))
+        // WKT debe estar en el archivo. `data` es el .las binario completo
+        // (cabecera + registros de puntos con doubles/int32) — casi con
+        // certeza contiene bytes con el bit alto encendido, así que
+        // `String(data:encoding:.ascii)` sobre el archivo entero devuelve
+        // nil (Foundation decodifica todo o nada) y la aserción quedaba sin
+        // relación alguna con si el VLR WKT estaba bien escrito. Se busca la
+        // subcadena directamente en los bytes crudos.
+        #expect(containsASCIISubstring("WGS 84", in: data) || containsASCIISubstring("UTM zone", in: data))
     }
 }
 
@@ -239,6 +261,14 @@ struct GeoJSONWriterTests {
     @Test("Perfil degraded redondea coordenadas a 100 m")
     func degradedProfileRoundsCoordinates() throws {
         var metadata = try sampleMetadata()
+        // Coordenada deliberadamente NO redonda: si el redondeo a 100 m no
+        // ocurriera, el valor exportado sería distinto del esperado. Con una
+        // entrada ya múltiplo de 100 (como usaba sampleMetadata() antes) el
+        // test no podía distinguir "se redondeó" de "no se redondeó nada".
+        metadata.utm = try UTMCoordinate(
+            easting: 350_147.32, northing: 6_300_083.71, ellipsoidalHeight: 500,
+            zone: 19, isNorthernHemisphere: false, epsg: 32719, datum: "WGS84"
+        )
         metadata.precisionProfile = .degraded
         let writer = GeoJSONWriter()
 
@@ -248,8 +278,10 @@ struct GeoJSONWriterTests {
         let r = try writer.write(metadata: metadata, to: dir.appendingPathComponent("degraded.geojson"))
         let content = try String(contentsOf: r.fileURL)
 
-        // 350000 → 350000 (ya es múltiplo de 100), pero verificamos que no tiene decimales
-        #expect(!content.contains("350000.0"))
+        // 350147.32 → 350100 (múltiplo de 100 más cercano); 6300083.71 → 6300100
+        #expect(content.contains("350100"), "Easting debe redondearse a 350100, contenido: \(content)")
+        #expect(content.contains("6300100"), "Northing debe redondearse a 6300100, contenido: \(content)")
+        #expect(!content.contains("350147"), "No debe quedar la coordenada exacta sin redondear")
     }
 }
 

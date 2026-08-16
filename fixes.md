@@ -727,6 +727,9 @@ las etiquetas "Espécimen A/B") en el test lo arregla sin tocar `ManualSegmenter
 
 ### "LAS 1.4 contiene VLR WKT y header válido": decodificar un archivo binario completo como ASCII no es un método válido de aserción
 
+**✅ Corregido.** Se reemplazó `String(data:encoding:.ascii)` sobre el archivo completo por
+una búsqueda de subcadena directamente en los bytes crudos (`containsASCIISubstring`).
+
 **Severidad:** Media (calidad de test) — no se encontró evidencia de que `LASWriter` omita
 el WKT
 
@@ -748,6 +751,10 @@ buscar la subcadena WKT dentro de los bytes crudos (`Data.range(of:)`) o decodif
 rango de bytes del VLR, no el archivo entero.
 
 ### "Perfil degraded redondea coordenadas a 100 m": el test no puede detectar si el redondeo ocurre o no
+
+**✅ Corregido.** El test ahora usa una coordenada deliberadamente no redonda
+(`350147.32, 6300083.71`) y verifica que el GeoJSON exportado contenga el múltiplo de 100
+más cercano (`350100`, `6300100`) y no la coordenada exacta sin redondear.
 
 **Severidad:** Media — deja sin verificar una mitigación de riesgo que el propio plan pide
 
