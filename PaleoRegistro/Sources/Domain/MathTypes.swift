@@ -78,7 +78,15 @@ public struct Matrix3x3: Sendable {
                 for k in 0..<3 {
                     sum += lhs[k][r] * col[k]
                 }
-                result[r][c] = sum
+                // sum = Σ_k lhs[r,k]·rhs[k,c] = (lhs·rhs)[r,c] — el elemento
+                // de fila r, columna c del producto. Con almacenamiento por
+                // columnas (subscript[columna][fila]), eso va en
+                // result[c][r], no en result[r][c] (que guardaba el
+                // resultado transpuesto: cualquier composición de rotaciones
+                // encadenada —A*B*C— quedaba silenciosamente traspuesta,
+                // dejando de ser una rotación válida a partir de la segunda
+                // multiplicación).
+                result[c][r] = sum
             }
         }
         return result
@@ -199,7 +207,17 @@ public struct Matrix4x4: Sendable {
                 for k in 0..<4 {
                     sum += self[k][r] * col[k]
                 }
-                result[r][c] = sum
+                // Mismo bug que en Matrix3x3 * Matrix3x3 (ver el comentario
+                // ahí): sum es el elemento (fila r, columna c) del producto,
+                // que en almacenamiento por columnas va en result[c][r].
+                // result[r][c] guardaba el producto TRASPUESTO — para una
+                // matriz afín 4×4, eso mueve la traslación (columna 3) a la
+                // fila 3 y dejaba `.translation` leyendo (0,0,0), y hace que
+                // cualquier composición encadenada de transformaciones
+                // (exactamente lo que hace ICPAligner en cada iteración,
+                // `transform = deltaTransform * transform`) se corrompa
+                // después del primer paso.
+                result[c][r] = sum
             }
         }
         return result

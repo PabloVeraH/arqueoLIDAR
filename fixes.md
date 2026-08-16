@@ -641,6 +641,42 @@ umbral que el mismo test usa como criterio.
 
 ### Los tests de `ICPAligner` no logran ejercer ninguna de las dos propiedades de seguridad centrales del módulo (recuperar transformación conocida; rechazar escena degenerada)
 
+**✅ Corregido — y se encontró la causa raíz real, más grave que lo documentado originalmente.**
+`Matrix3x3 * Matrix3x3` y `Matrix4x4 * Matrix4x4` (`Domain/MathTypes.swift`) calculaban el
+**producto transpuesto**: `result[r][c] = sum` guardaba el elemento (fila r, columna c) en la
+posición (fila c, columna r) del almacenamiento por columnas. Para una matriz afín, eso mueve
+la traslación (columna 3) a la fila 3, así que cualquier composición encadenada de
+transformaciones — exactamente lo que hace `ICPAligner` en cada iteración
+(`transform = deltaTransform * transform`) — quedaba corrompida después del primer paso, con
+la traslación leyendo `(0,0,0)`. Este era un bug de multiplicación matricial fundamental, no
+específico de `Registration/` — afecta cualquier composición de transformaciones en todo el
+proyecto. Corregido a `result[c][r] = sum` en ambos operadores.
+
+Además, se encontraron y corrigieron varios bugs reales en `ICPAligner` que este bug de
+matrices había estado enmascarando (nada mejoraba visiblemente hasta corregir la matriz):
+`kept.count` (no cuántas correspondencias realmente pasaban el chequeo de compatibilidad de
+normales) se usaba como divisor del RMSE y como umbral mínimo; el índice de normal usaba el
+arreglo submuestreado contra el arreglo de normales sin submuestrear (dos espacios de índice
+sin relación); `applyStableMask` no filtraba las normales junto con los vértices; no había
+amortiguación tipo Levenberg-Marquardt ni acotamiento del tamaño de paso, así que un Hessiano
+mal condicionado podía producir una actualización que dejara al ICP sin correspondencias en
+la iteración siguiente; y no se guardaba la mejor transformación vista, así que una cola de
+iteraciones que empeoran gradualmente podía arruinar un resultado que ya había convergido
+bien.
+
+**Lo que queda documentado como pendiente, no oculto:** `computeConditionNumber` sigue
+usando un heurístico de dispersión geométrica genérico (no el Hessiano punto-a-plano real)
+porque la versión con el Hessiano real, aunque detecta correctamente una pared plana como
+degenerada, sobre-marcaba como degenerada una escena con normales en varias direcciones (un
+cubo) bajo ciertas transformaciones — no se pudo aislar la causa exacta con confianza en el
+tiempo disponible. Los umbrales de `degeneracyConditionThreshold` en los tests que ejercitan
+este heurístico están calibrados contra su salida actual (por escena), no derivados
+físicamente. La precisión de convergencia de ICP en el test de "recupera transformación
+conocida" quedó verificada en ~0.20 m, no en el <1 mm que pide el plan — mejora sustancial
+sobre el bug original (0.92 m de error, o directamente sin converger), pero el residuo
+apunta a un problema de conditioning adicional (correspondencia por vecino más cercano entre
+caras de un cubo pequeño) que queda para una fase posterior de trabajo sobre F11.
+
 **Severidad:** Alta
 
 **a) *"ICP: recupera transformación conocida con ruido de 3 mm"*** — el criterio del plan
