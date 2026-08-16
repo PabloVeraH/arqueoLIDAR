@@ -847,6 +847,19 @@ declarada.
 
 ### `PLYWriter` descarta silenciosamente `mesh.colors` y `mesh.normals` — el PLY de peritaje nunca lleva el mapa de calor que el plan pide
 
+**✅ Corregido.** `Mesh/PLYCodec.encode(_:)` ahora agrega condicionalmente las propiedades
+`nx,ny,nz` (float) y `red,green,blue,alpha` (uchar) por vértice cuando `mesh.normals`/
+`mesh.colors` están presentes y su cuenta coincide exactamente con `mesh.vertices.count`
+(si no coincide, se omiten en vez de leer fuera de rango — la malla nunca debería llegar en
+ese estado, pero el códec no confía ciegamente en el invariante). `decode(_:)` detecta la
+presencia de estas propiedades en la cabecera y reconstruye `mesh.normals`/`mesh.colors` en
+el mismo orden fijo en que `encode(_:)` las escribe (no es un lector PLY genérico que
+reordene por cabecera arbitraria). Como tanto `BundleWriter`/`FindingStore` (formato interno
+del bundle) como `Export/PLYWriter` (export de peritaje) delegan en el mismo códec, este fix
+resuelve el descarte en ambos lugares a la vez. Se agregaron tests de round-trip con
+normales+colores, con solo colores, y del caso de cuenta desalineada (`PLYCodecTests` en
+`MeshTests.swift`). Suite completa: 148/148 tests pasando.
+
 **Severidad:** Alta
 
 `Sources/Export/PLYWriter.swift:26-45` escribe la cabecera PLY con solo tres propiedades por

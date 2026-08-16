@@ -475,4 +475,48 @@ struct PLYCodecTests {
             _ = try PLYCodec.decode(data)
         }
     }
+
+    @Test("encode → decode conserva normales y colores por vértice (antes se descartaban en silencio)")
+    func roundTripNormalsAndColors() throws {
+        let base = SyntheticMeshes.cube(center: .zero, size: 0.4)
+        let normals = (0..<base.vertices.count).map { vecNormalize(base.vertices[$0]) }
+        let colors = (0..<base.vertices.count).map { i -> SIMD4<UInt8> in
+            let r: UInt8 = UInt8(i % 256)
+            let g: UInt8 = UInt8((i * 7) % 256)
+            let b: UInt8 = UInt8((i * 13) % 256)
+            return SIMD4(r, g, b, 255)
+        }
+        let mesh = Mesh(vertices: base.vertices, indices: base.indices, normals: normals, colors: colors)
+
+        let data = PLYCodec.encode(mesh)
+        let decoded = try PLYCodec.decode(data)
+
+        #expect(decoded == mesh)
+        #expect(decoded.normals != nil)
+        #expect(decoded.colors != nil)
+    }
+
+    @Test("encode omite normales/colores cuya cuenta no coincide con los vértices, en vez de leer fuera de rango")
+    func encodeIgnoresMismatchedOptionalArrays() throws {
+        let base = SyntheticMeshes.cube(center: .zero, size: 0.4)
+        // Un solo normal para 8 vértices: cuenta no coincide, no debe indexar fuera de rango.
+        let mesh = Mesh(vertices: base.vertices, indices: base.indices, normals: [SIMD3<Float>(0, 1, 0)], colors: nil)
+
+        let data = PLYCodec.encode(mesh)
+        let decoded = try PLYCodec.decode(data)
+
+        #expect(decoded.normals == nil)
+        #expect(decoded.vertices == base.vertices)
+    }
+
+    @Test("encode con solo colores (sin normales) produce un round-trip correcto")
+    func roundTripColorsOnly() throws {
+        let base = SyntheticMeshes.cube(center: .zero, size: 0.2)
+        let colors = (0..<base.vertices.count).map { _ in SIMD4<UInt8>(10, 20, 30, 255) }
+        let mesh = Mesh(vertices: base.vertices, indices: base.indices, normals: nil, colors: colors)
+
+        let decoded = try PLYCodec.decode(PLYCodec.encode(mesh))
+        #expect(decoded == mesh)
+        #expect(decoded.normals == nil)
+    }
 }
