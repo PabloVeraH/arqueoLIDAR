@@ -299,14 +299,8 @@ Si quieres comprobar que el expediente no fue manipulado:
 python3 /Users/tu_usuario/Documentos/arqueoLidar/tools/verify_chain.py "/ruta/a/Findings/FND-..."
 ```
 
-> **Importante:** al momento de escribir esta guía, `verify_chain.py` tiene un
-> error conocido (ver `fixes.md`) que hace que reporte `FALLO` incluso en
-> expedientes íntegros, sin ninguna manipulación. Si ves `FALLO` al correr este
-> comando, **no asumas que el expediente está dañado** — es un problema de la
-> herramienta de verificación, no necesariamente del expediente. Consulta con
-> el equipo técnico antes de descartar nada.
-
-Si dice `VERIFICACIÓN: OK`, el expediente es íntegro.
+Si dice `VERIFICACIÓN: OK`, el expediente es íntegro. Si necesitas verificar además la
+firma criptográfica, instala `pip install cryptography` antes de correr el comando.
 
 ---
 

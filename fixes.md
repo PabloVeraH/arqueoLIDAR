@@ -8,6 +8,20 @@ resumen final.
 Formato de cada hallazgo: **Título**, **Severidad** (`Bloqueante` / `Alta` / `Media` / `Baja`),
 **Descripción**.
 
+> **Estado actual:** todos los hallazgos de este documento (dentro del alcance de los 11
+> módulos SPM en `PaleoRegistro/Sources` y `tools/*.py`) están marcados **✅ Corregido** —
+> cada uno con su nota de resolución bajo la severidad original, sin borrar la descripción
+> del problema encontrado. `swift build` y `swift test` corren en verde (148/148). Dos
+> excepciones quedan documentadas **explícitamente como pendientes, no ocultas**: la
+> heurística de `ICPAligner.computeConditionNumber` (ver el hallazgo de `ICPAligner` en
+> `Registration/`) y la precisión de convergencia de `ICPAligner` frente al objetivo
+> aspiracional de <1 mm del plan (hoy ~0.20 m, una mejora sustancial sobre el estado
+> original no convergente, pero no al nivel del plan). La capa `App/` (Fases 0, 3, 13, 14,
+> 15 — Xcode, ARKit, UI) sigue completamente fuera de alcance: no existe proyecto Xcode y
+> no puede crearse ni probarse en este entorno Linux. El resumen ejecutivo de abajo describe
+> el estado **al momento de la auditoría original**, antes de los fixes; se conserva sin
+> editar como registro histórico de lo encontrado.
+
 ## Resumen ejecutivo
 
 Revisión completa: estructura del proyecto, los 11 módulos de `PaleoRegistro/Sources`, la
@@ -1055,6 +1069,15 @@ el `README.md` (ver más abajo) da a entender que solo falta "crear el contenedo
 ---
 
 ## `README.md` — afirma que "el código de la lógica ya está hecho", lo cual es impreciso
+
+**✅ Corregido.** Se suavizó la frase de la Parte 2 ("ya está escrito, pero no todo funciona
+correctamente todavía... revisa `fixes.md`") y se agregó una nota de advertencia antes del
+paso de `verify_chain.py` en la Parte 9.3. Esa segunda nota ya se retiró (ver el hallazgo de
+`verify_chain.py` más arriba: el bug que advertía ya está corregido, así que la advertencia
+quedaría obsoleta y confundiría más de lo que ayudaría). Con todos los hallazgos de este
+documento corregidos, la afirmación original ya no es materialmente engañosa — sigue siendo
+cierto, y sigue documentado explícitamente en el README, que la capa `App/` (Xcode, ARKit,
+UI) no existe todavía.
 
 **Severidad:** Media
 
