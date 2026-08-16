@@ -57,6 +57,12 @@ let package = Package(
         // F12
         .target(name: "Export", dependencies: ["Domain", "Mesh", "Geo", "Custody", "Persistence"]),
 
+        // Herramienta de verificación externa (fixes.md): imprime UTM real
+        // calculado por UTMConverter en CSV, para que tools/check_utm.py
+        // --file lo cruce contra pyproj. Sin esto, check_utm.py solo podía
+        // comparar pyproj contra sí mismo — nunca contra la app.
+        .executableTarget(name: "UTMReferenceDump", dependencies: ["Domain", "Geo"]),
+
         // ─── Tests ───
         .testTarget(name: "DomainTests", dependencies: ["Domain"]),
         .testTarget(name: "GeometryTests", dependencies: ["Geometry", "Domain"]),

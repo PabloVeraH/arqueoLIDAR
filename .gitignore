@@ -14,3 +14,7 @@ DerivedData/
 .env
 *.swp
 *~
+
+# Generado por `swift run UTMReferenceDump` (tools/check_utm.py --file lo consume;
+# es un artefacto derivado y determinista, no una fuente de verdad versionada).
+tools/utm_reference.txt

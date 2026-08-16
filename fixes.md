@@ -389,6 +389,32 @@ porque estos tests fallan de todos modos por causas ajenas al solver).
 
 ### `tools/check_utm.py` nunca llama al conversor de la app — su "round-trip" compara `pyproj` contra sí mismo
 
+**✅ Corregido.** Se implementó el modo `--file` que el docstring ya prometía, en ambos lados:
+
+- **Lado Swift** — nuevo target ejecutable `UTMReferenceDump` (`Sources/UTMReferenceDump/main.swift`,
+  agregado a `Package.swift`) que llama al `UTMConverter` real de la app sobre 24 puntos que
+  cubren Chile continental e insular (husos 12/18/19, bordes de huso) e imprime CSV
+  (`lat,lon,easting,northing,zone,hemisphere,epsg`) por stdout. Puntos fuera de los husos que
+  la app soporta reportan el error tipado por stderr en vez de interrumpir el resto del volcado.
+- **Lado Python** — `check_utm.py` ahora usa `argparse` con `--file <path>` y
+  `--tolerance-mm` (default 1 mm, igual que `GeoTests`). Con `--file`, lee el CSV y para cada
+  punto recalcula zona/hemisferio/EPSG/E/N con `pyproj` de forma independiente, compara contra
+  lo que reportó la app, y falla si hay discrepancia de huso o si el error de posición supera
+  la tolerancia.
+- De paso se corrigió `CONTROL_POINTS`, la tabla de puntos de control *local* de este script
+  (independiente de la de `GeoTests`, ya corregida antes): tenía valores redondeados a mano
+  que además clasificaban mal el huso de 3 de sus 8 puntos, por lo que el propio script
+  reportaba `[DISCREPANCIA]` de hasta 2295 m en los 8 puntos — no por un bug del
+  `UTMConverter`, sino porque la tabla de referencia del script estaba mal. Se reemplazó por
+  los mismos puntos que `GeoTests.zone18Points/zone19Points/zone12Points`, con E/N de
+  `pyproj` a precisión completa y tolerancia de 1 mm.
+
+Verificado extremo a extremo: `swift run UTMReferenceDump > tools/utm_reference.txt` seguido
+de `python3 tools/check_utm.py --file tools/utm_reference.txt` corre en verde, con un error
+máximo app-vs-pyproj de 0.621 mm sobre 20 puntos (los 4 restantes caen en huso 20, no
+soportado por el `UTMConverter`, y se excluyen limpiamente). `tools/utm_reference.txt` es un
+artefacto generado y determinista — no se versiona (agregado a `.gitignore`).
+
 **Severidad:** Alta
 
 El criterio de aceptación de F8 pide expresamente: *"Cruce contra una implementación
