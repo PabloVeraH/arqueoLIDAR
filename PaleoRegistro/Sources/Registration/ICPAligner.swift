@@ -54,7 +54,7 @@ public struct ICPAligner: MeshRegistering, Sendable {
 
             guard srcPts.count >= 10, effectiveTarget.vertices.count >= 10 else { continue }
 
-            // Hash espacial sobre el target COMPLETO, no submuestreado
+            // Hash de triángulos sobre el target COMPLETO, no submuestreado
             // (fixes.md, "convergencia de ICP a menos de 1 mm"): punto-a-
             // plano es tolerante a qué punto exacto de una cara plana se
             // use como correspondencia — el residuo (Rp+t−q)·n es el mismo
@@ -71,6 +71,16 @@ public struct ICPAligner: MeshRegistering, Sendable {
             // adelgazamiento. `source` sigue submuestreado — no es donde
             // vivía el problema, y sigue siendo el control de cuántos
             // puntos se transforman/emparejan por iteración.
+            //
+            // `TriangleHash` reemplaza la búsqueda punto→vértice más cercano
+            // (fixes.md, "correspondencia punto→triángulo"): con solo
+            // vértices, la correspondencia más cercana posible está acotada
+            // por el espaciado real entre vértices del target — el
+            // espaciado del sensor LiDAR, no un parámetro que el algoritmo
+            // controle. `TriangleHash.nearest()` proyecta el punto fuente
+            // sobre la superficie del triángulo más cercano (Ericson,
+            // "Real-Time Collision Detection", 2005, §5.1.5), reduciendo ese
+            // error de cuantización a segundo orden dentro de cada cara.
             //
             // El tamaño de celda del hash NO puede derivarse solo de
             // `voxelSize`: `nearest()` busca en un vecindario de 3×3×3
@@ -90,7 +100,7 @@ public struct ICPAligner: MeshRegistering, Sendable {
             // un radio de captura de al menos `maxCorrespondenceDistance`
             // en cualquier nivel, independiente de `voxelSize`.
             let hashCellSize = max(voxelSize * 2, options.maxCorrespondenceDistance)
-            let targetHash = SpatialHash(points: effectiveTarget.vertices, cellSize: hashCellSize)
+            let targetHash = TriangleHash(mesh: effectiveTarget, cellSize: hashCellSize)
 
             let cosNormalMax = cos(options.normalCompatibilityAngleDegrees * .pi / 180)
 
@@ -115,18 +125,18 @@ public struct ICPAligner: MeshRegistering, Sendable {
                 // Transformar source points
                 let srcTransformed = srcPts.map { transform.applyAffine($0.point) }
 
-                // Correspondencias via hash espacial
-                var correspondences: [(srcIdx: Int, tgtPt: SIMD3<Float>, srcOriginalIdx: Int, tgtOriginalIdx: Int)] = []
+                // Correspondencias via hash de triángulos: `tgtPt` ya es el
+                // punto proyectado sobre la superficie (no un vértice
+                // discreto) y `tgtNormal` su normal interpolada en ese punto
+                // exacto — `nil` si el target no trae normales reales, en
+                // cuyo caso el loop de abajo cae al mismo respaldo de
+                // siempre (dirección fuente→destino).
+                var correspondences: [(srcIdx: Int, tgtPt: SIMD3<Float>, srcOriginalIdx: Int, tgtNormal: SIMD3<Float>?)] = []
                 for (i, sp) in srcTransformed.enumerated() {
-                    if let tgtIdx = targetHash.nearest(to: sp) {
-                        // `tgtIdx` ya es el índice real en `effectiveTarget`
-                        // (el hash busca sobre el arreglo completo) — no
-                        // hace falta traducirlo desde un espacio de índices
-                        // submuestreado.
-                        let tgt = effectiveTarget.vertices[tgtIdx]
-                        let diff = vecLength(sp - tgt)
+                    if let match = targetHash.nearest(to: sp) {
+                        let diff = vecLength(sp - match.point)
                         if diff < options.maxCorrespondenceDistance {
-                            correspondences.append((i, tgt, srcPts[i].index, tgtIdx))
+                            correspondences.append((i, match.point, srcPts[i].index, match.normal))
                         }
                     }
                 }
@@ -163,10 +173,14 @@ public struct ICPAligner: MeshRegistering, Sendable {
                     let sp = srcPts[corr.srcIdx].point
                     let tgt = corr.tgtPt
 
-                    // Normal del target (si no disponible, usar vector fuente→target)
+                    // Normal en el punto de correspondencia exacto (interpolada
+                    // baricéntricamente por `TriangleHash`, no la de un único
+                    // vértice — ver fixes.md, "correspondencia punto→triángulo").
+                    // Si el target no trae normales reales, respaldo idéntico al
+                    // de siempre: dirección fuente→target.
                     let normal: SIMD3<Float>
-                    if tgtHasNormals, let norms = effectiveTarget.normals, corr.tgtOriginalIdx < norms.count {
-                        normal = norms[corr.tgtOriginalIdx]
+                    if tgtHasNormals, let tgtNormal = corr.tgtNormal {
+                        normal = tgtNormal
                         // Chequeo de compatibilidad de normales
                         let srcNormal = transform.rotation3x3 * (
                             (corr.srcOriginalIdx < (source.normals?.count ?? 0)) ? source.normals![corr.srcOriginalIdx] : normal
@@ -613,6 +627,106 @@ private struct SpatialHash {
         }
 
         return bestIdx
+    }
+
+    private func vecDistSq(_ a: SIMD3<Float>, _ b: SIMD3<Float>) -> Float {
+        let d = a - b
+        return d.x * d.x + d.y * d.y + d.z * d.z
+    }
+}
+
+// MARK: - Triangle Hash (correspondencia punto→superficie)
+
+/// Como `SpatialHash`, pero busca el punto más cercano sobre la SUPERFICIE de
+/// la malla (proyectado dentro de un triángulo vía `closestPointOnTriangle`),
+/// no el vértice discreto más cercano. Cada triángulo se indexa por la celda
+/// de su centroide — igual criterio que `SpatialHash` usa por vértice — así
+/// que el radio de captura real sigue siendo ~`cellSize` en el peor caso; un
+/// triángulo grande cuyo centroide cae fuera del vecindario 3×3×3 del punto
+/// de consulta puede perderse como candidato, la misma limitación que ya
+/// tenía la búsqueda por vértices, documentada donde se calcula
+/// `hashCellSize` en `align()`. Con `indices` vacío (nube de puntos sin
+/// triangulación) cada vértice se indexa como un triángulo degenerado
+/// (a==b==c) — `closestPointOnTriangle` lo trata como punto único, así que el
+/// comportamiento se reduce exactamente al de la búsqueda por vértices.
+private struct TriangleHash {
+    private var grid: [SIMD3<Int>: [Int]] = [:]
+    private let vertices: [SIMD3<Float>]
+    private let indices: [UInt32]
+    private let normals: [SIMD3<Float>]?
+    private let cellSize: Float
+    private let triangleCount: Int
+
+    init(mesh: Mesh, cellSize: Float) {
+        self.vertices = mesh.vertices
+        self.indices = mesh.indices
+        self.normals = mesh.normals
+        self.cellSize = cellSize
+        self.triangleCount = indices.isEmpty ? vertices.count : indices.count / 3
+
+        for t in 0..<triangleCount {
+            let (a, b, c, _, _, _) = triangleVertices(t)
+            let centroid = (a + b + c) / 3
+            grid[cellKey(centroid), default: []].append(t)
+        }
+    }
+
+    /// Vértices del triángulo `t` y sus índices originales. Sin `indices`
+    /// (nube de puntos), el triángulo `t` es el vértice `t` repetido 3 veces.
+    private func triangleVertices(_ t: Int) -> (SIMD3<Float>, SIMD3<Float>, SIMD3<Float>, Int, Int, Int) {
+        if indices.isEmpty {
+            return (vertices[t], vertices[t], vertices[t], t, t, t)
+        }
+        let ia = Int(indices[t * 3]), ib = Int(indices[t * 3 + 1]), ic = Int(indices[t * 3 + 2])
+        return (vertices[ia], vertices[ib], vertices[ic], ia, ib, ic)
+    }
+
+    private func cellKey(_ p: SIMD3<Float>) -> SIMD3<Int> {
+        SIMD3<Int>(Int(floor(p.x / cellSize)), Int(floor(p.y / cellSize)), Int(floor(p.z / cellSize)))
+    }
+
+    /// Punto más cercano sobre la superficie a `query`, junto con la normal
+    /// en ese punto exacto — interpolada baricéntricamente entre los 3
+    /// vértices del triángulo si `mesh.normals` existe (más precisa que la
+    /// normal de un único vértice cerca de una zona de curvatura), o `nil` si
+    /// el target no trae normales reales (el llamador cae a su propio
+    /// respaldo, igual que antes de este cambio).
+    func nearest(to query: SIMD3<Float>) -> (point: SIMD3<Float>, normal: SIMD3<Float>?, triangleIndex: Int)? {
+        let key = cellKey(query)
+
+        var bestDist: Float = .infinity
+        var best: (point: SIMD3<Float>, barycentric: SIMD3<Float>, triangle: Int)?
+
+        for dx in -1...1 {
+            for dy in -1...1 {
+                for dz in -1...1 {
+                    let nKey = SIMD3<Int>(key.x + dx, key.y + dy, key.z + dz)
+                    guard let candidates = grid[nKey] else { continue }
+                    for t in candidates {
+                        let (a, b, c, _, _, _) = triangleVertices(t)
+                        let proj = closestPointOnTriangle(query, a, b, c)
+                        let d2 = vecDistSq(query, proj.point)
+                        if d2 < bestDist {
+                            bestDist = d2
+                            best = (proj.point, proj.barycentric, t)
+                        }
+                    }
+                }
+            }
+        }
+
+        guard let match = best else { return nil }
+
+        var interpolatedNormal: SIMD3<Float>?
+        if let norms = normals {
+            let (_, _, _, ia, ib, ic) = triangleVertices(match.triangle)
+            if ia < norms.count, ib < norms.count, ic < norms.count {
+                let n = norms[ia] * match.barycentric.x + norms[ib] * match.barycentric.y + norms[ic] * match.barycentric.z
+                interpolatedNormal = vecNormalize(n)
+            }
+        }
+
+        return (match.point, interpolatedNormal, match.triangle)
     }
 
     private func vecDistSq(_ a: SIMD3<Float>, _ b: SIMD3<Float>) -> Float {

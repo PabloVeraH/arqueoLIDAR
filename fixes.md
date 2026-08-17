@@ -11,14 +11,24 @@ Formato de cada hallazgo: **Título**, **Severidad** (`Bloqueante` / `Alta` / `M
 > **Estado actual:** todos los hallazgos de este documento (dentro del alcance de los 11
 > módulos SPM en `PaleoRegistro/Sources` y `tools/*.py`) están marcados **✅ Corregido** —
 > cada uno con su nota de resolución bajo la severidad original, sin borrar la descripción
-> del problema encontrado. `swift build` y `swift test` corren en verde (153/153). Una
+> del problema encontrado. `swift build` y `swift test` corren en verde (162/162). Una
 > excepción queda documentada **explícitamente como pendiente, no oculta**: la precisión de
 > convergencia de `ICPAligner` frente al objetivo aspiracional de <1 mm del plan — mejoró de
 > ~0.20 m a ~0.06 m corrigiendo 4 bugs reales en la cadena correspondencia→convergencia (ver
-> el hallazgo de `ICPAligner` en `Registration/`), pero no llega al nivel del plan; la
-> evidencia actual apunta a la densidad de la nube como el factor dominante, no a un bug
-> puntual adicional. `ICPAligner.computeConditionNumber` (antes también pendiente) ya usa el
-> Hessiano punto-a-plano real con normalización de escala y descomposición espectral en
+> el hallazgo de `ICPAligner` en `Registration/`), pero no llega al nivel del plan. Sesión de
+> seguimiento (17 ago 2026): (a) se confirmó que la Fase 3 (`App/Capture`, la capa que
+> produciría una nube densa propia y mediría el ruido real del sensor) sigue sin implementar
+> — son directorios vacíos — así que **el <1 mm del plan no puede validarse contra hardware
+> real todavía**; el propio plan ya documenta el límite físico conocido (ruido de profundidad
+> ARKit ~1-2 cm a 1-2 m, §2.F riesgo 1), que por sí solo excede el objetivo del test de
+> aceptación de Fase 11 (ruido de entrada de 3 mm, meta de 1 mm) en un orden de magnitud; (b)
+> se implementó correspondencia punto→triángulo (antes: punto→vértice más cercano) en
+> `ICPAligner`, medida como una reducción del 76% en el error de cuantización de
+> correspondencia sobre superficie curva — sin efecto medible sobre el cubo sintético de
+> `RegistrationTests` (0.0616 m antes y después) porque sus caras son perfectamente planas, el
+> caso donde este cambio no puede ayudar por construcción. Ver el detalle en el hallazgo de
+> `ICPAligner`, más abajo. `ICPAligner.computeConditionNumber` (antes también pendiente) ya usa
+> el Hessiano punto-a-plano real con normalización de escala y descomposición espectral en
 > Double. La capa `App/` (Fases 0, 3, 13, 14, 15 — Xcode, ARKit, UI) sigue completamente fuera
 > de alcance: no existe proyecto Xcode y no puede crearse ni probarse en este entorno Linux.
 > El resumen ejecutivo de abajo describe el estado **al momento de la auditoría original**,
@@ -890,6 +900,91 @@ Variants of the ICP Algorithm"* (3DIM) — normal-space sampling, para no perder
 frente a las grandes al submuestrear; Segal, Haehnel & Thrun (2009), *"Generalized-ICP"*
 (RSS) — plano-a-plano con covarianzas por punto, el salto de cm a mm que exigiría más que
 ajustes de parámetros.
+
+---
+
+**Sesión de seguimiento (17 ago 2026) — dos pasos, en el orden acordado antes de tocar
+código: (1) medir el piso de ruido real antes de invertir en el algoritmo, (2) mejorar la
+correspondencia de ICP de punto→vértice a punto→triángulo.**
+
+**Paso 1 — el piso de ruido real no puede medirse todavía; el plan ya documenta el límite
+físico conocido, y hay una tensión interna sin resolver.** Verificado antes de tocar código
+(metodología del resto de este documento: medir, no asumir): la Fase 3 del plan
+(`App/Capture` — `ARSessionManager`, `MeshAnchorReader`, `DepthAccumulator`,
+`CoverageTracker`) es la que produciría, según §3 Fase 3, "una nube densa propia desde
+`sceneDepth` filtrada por `confidenceMap`... con al menos un orden de magnitud más puntos que
+`ARMeshAnchor`", y la que ejecutaría la "Prueba de ruido del sensor, medida no asumida"
+(apuntar a una pared real y reportar σ de los residuos). Ninguna de las dos existe: `App/`
+tiene únicamente carpetas vacías (`Capture/`, `Rendering/`, `UI/`, `ExportApp/`,
+`PersistenceProviders/`, `CustodyProviders/`, `GeoProviders/`, `App/`) — 0 archivos `.swift`
+en ninguna. No hay proyecto Xcode, no hay target de app, y (correctamente) no puede crearse ni
+probarse en este entorno Linux. Consecuencia directa: **no hay ninguna medición propia posible
+del ruido real del sensor**, ni de la densidad real de la nube capturada, hasta que esa fase
+se implemente y se ejecute en un iPhone físico.
+
+Lo que sí existe es la cifra que el propio plan ya documenta como conocimiento previo, no
+medido: §2.F riesgo 1 declara *"la malla de `ARMeshAnchor` tiene triángulos de ~5-10 cm y está
+suavizada; el ruido de profundidad es de 1-2 cm a 1-2 m y crece rápido más allá"*. Esa cifra,
+tomada tal cual, ya es suficiente para poner en tensión el criterio de aceptación de esta
+misma Fase 11: el test `recoversKnownTransform` (arriba) inyecta solo 3 mm de ruido sintético
+y el plan (§3 Fase 11) exige recuperar la transformación dentro de 1 mm — un objetivo que,
+con el ruido de profundidad real que el propio plan reconoce (1-2 cm, un orden de magnitud
+mayor que los 3 mm del test), sería matemáticamente inalcanzable incluso con un ICP perfecto:
+el RMSE de un registro no puede bajar de `√(σ²_src + σ²_tgt)`, que con σ≈15 mm en ambas nubes
+ya da un piso ≈21 mm — veinte veces el objetivo de 1 mm. Esto no es un hallazgo nuevo sobre el
+algoritmo; es una inconsistencia entre dos secciones del propio plan (el riesgo 2.F.1, que
+reconoce el ruido real del sensor, y el criterio de aceptación de Fase 11, que lo ignora) que
+ya existía antes de esta sesión y que ninguna mejora a `ICPAligner` puede resolver por sí
+sola. La mitigación de diseño que el plan propone para esto — la nube densa filtrada y
+promediada de `DepthAccumulator` — es precisamente la pieza no implementada de arriba.
+**Recomendación, no aplicada en este ciclo:** cuando la Fase 3 exista, correr la prueba de
+ruido del propio plan y, con esa cifra real, decidir si el criterio de aceptación de Fase 11
+se mantiene, se relaja explícitamente, o se redefine contra la nube densa de
+`DepthAccumulator` en vez de contra `ARMeshAnchor`.
+
+**Paso 2 — correspondencia punto→triángulo, implementada y medida.** `ICPAligner` buscaba
+correspondencias con `SpatialHash.nearest()`, que devuelve el **vértice** target más cercano
+— la distancia mínima posible de cualquier correspondencia queda acotada por el espaciado
+real entre vértices del target (el espaciado del sensor, no un parámetro del algoritmo).
+Se agregó `closestPointOnTriangle` (`Sources/Registration/ClosestPointOnTriangle.swift`,
+algoritmo de Ericson, *"Real-Time Collision Detection"*, 2005, §5.1.5 — clasificación de
+regiones de Voronoi del triángulo, 8 tests unitarios en
+`Tests/RegistrationTests/ClosestPointOnTriangleTests.swift`) y una nueva `TriangleHash` en
+`ICPAligner.swift` que la usa para proyectar cada punto fuente sobre el triángulo target más
+cercano (no solo su vértice más cercano), interpolando también la normal en ese punto exacto
+por coordenadas baricéntricas cuando el target trae normales reales. Con target sin
+triangulación (nube de puntos pura, `indices` vacío), cada vértice se indexa como un triángulo
+degenerado (a==b==c) y el comportamiento se reduce exactamente al de antes — sin regresión
+para ese caso.
+
+**Medido, no asumido — y con un resultado que corrige una expectativa inicial:** sobre el
+cubo sintético de `recoversKnownTransform` el cambio **no tuvo efecto medible** (0.0616 m de
+error de traslación, idéntico antes y después, con y sin el nivel de vóxel más fino de 0.02).
+La razón, verificada aparte: las 6 caras de `denseCubeMesh` son perfectamente planas, y el
+residuo punto-a-plano `(Rp+t−q)·n` ya es invariante a qué punto exacto de una misma cara
+plana se usa como `q` — exactamente el mismo argumento que explica por qué el fix #1 del
+hallazgo de arriba ("hash sobre el target completo") midió solo ~2% de efecto aislado. Un
+experimento de control aparte, sobre una malla esférica de 8×8 divisiones (curvatura real,
+no representada en ningún test sintético de este proyecto): comparando, para 300 puntos
+aleatorios sobre la esfera unitaria exacta, la distancia RMS al vértice más cercano contra la
+distancia RMS al punto proyectado sobre el triángulo más cercano, el error de cuantización
+bajó de 0.218 a 0.053 (**reducción del 76%**) — ver el test permanente
+`curvedSurfaceQuantizationReduction` en `ClosestPointOnTriangleTests.swift`, que fija un
+umbral de 50% de reducción como piso de regresión. La conclusión honesta: el cambio es
+matemáticamente correcto, de bajo riesgo (sin ninguna regresión en los 162 tests del
+proyecto), y de alto impacto esperado en superficies curvas irregulares — el caso real de
+huesos, rocas y estratos que este proyecto escanea — pero **la suite de tests sintéticos
+actual no puede exhibir ese beneficio**, porque su única malla usada en criterios de
+aceptación de ICP (`denseCubeMesh`) es plana por construcción. Queda pendiente, para medir el
+efecto real sobre el objetivo de convergencia, agregar un escenario de aceptación con
+curvatura (o esperar datos reales de la Fase 3).
+
+**Archivos:** `Sources/Registration/ClosestPointOnTriangle.swift` (nuevo),
+`Sources/Registration/ICPAligner.swift` (`SpatialHash` reemplazada por `TriangleHash` en la
+búsqueda de correspondencias; sin cambios en `computeRMSE`, que sigue midiendo contra
+vértices — fuera de alcance de este ciclo),
+`Tests/RegistrationTests/ClosestPointOnTriangleTests.swift` (nuevo, 9 tests). Suite completa:
+162/162 tests pasan.
 
 **Severidad:** Alta
 
