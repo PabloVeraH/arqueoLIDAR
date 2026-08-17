@@ -11,28 +11,38 @@ Formato de cada hallazgo: **Título**, **Severidad** (`Bloqueante` / `Alta` / `M
 > **Estado actual:** todos los hallazgos de este documento (dentro del alcance de los 11
 > módulos SPM en `PaleoRegistro/Sources` y `tools/*.py`) están marcados **✅ Corregido** —
 > cada uno con su nota de resolución bajo la severidad original, sin borrar la descripción
-> del problema encontrado. `swift build` y `swift test` corren en verde (162/162). Una
-> excepción queda documentada **explícitamente como pendiente, no oculta**: la precisión de
-> convergencia de `ICPAligner` frente al objetivo aspiracional de <1 mm del plan — mejoró de
-> ~0.20 m a ~0.06 m corrigiendo 4 bugs reales en la cadena correspondencia→convergencia (ver
-> el hallazgo de `ICPAligner` en `Registration/`), pero no llega al nivel del plan. Sesión de
-> seguimiento (17 ago 2026): (a) se confirmó que la Fase 3 (`App/Capture`, la capa que
-> produciría una nube densa propia y mediría el ruido real del sensor) sigue sin implementar
-> — son directorios vacíos — así que **el <1 mm del plan no puede validarse contra hardware
-> real todavía**; el propio plan ya documenta el límite físico conocido (ruido de profundidad
-> ARKit ~1-2 cm a 1-2 m, §2.F riesgo 1), que por sí solo excede el objetivo del test de
-> aceptación de Fase 11 (ruido de entrada de 3 mm, meta de 1 mm) en un orden de magnitud; (b)
-> se implementó correspondencia punto→triángulo (antes: punto→vértice más cercano) en
-> `ICPAligner`, medida como una reducción del 76% en el error de cuantización de
-> correspondencia sobre superficie curva — sin efecto medible sobre el cubo sintético de
-> `RegistrationTests` (0.0616 m antes y después) porque sus caras son perfectamente planas, el
-> caso donde este cambio no puede ayudar por construcción. Ver el detalle en el hallazgo de
-> `ICPAligner`, más abajo. `ICPAligner.computeConditionNumber` (antes también pendiente) ya usa
-> el Hessiano punto-a-plano real con normalización de escala y descomposición espectral en
-> Double. La capa `App/` (Fases 0, 3, 13, 14, 15 — Xcode, ARKit, UI) sigue completamente fuera
-> de alcance: no existe proyecto Xcode y no puede crearse ni probarse en este entorno Linux.
-> El resumen ejecutivo de abajo describe el estado **al momento de la auditoría original**,
-> antes de los fixes; se conserva sin editar como registro histórico de lo encontrado.
+> del problema encontrado. `swift build` y `swift test` corren en verde (162/162).
+>
+> **La precisión de convergencia de `ICPAligner` frente al objetivo de <1 mm del plan ya no
+> está pendiente en el sentido en que lo estuvo hasta hoy.** Dos sesiones reportaron una
+> mejora de ~0.20 m a ~0.06 m como el mejor resultado alcanzable (ver el hallazgo de
+> `ICPAligner` en `Registration/`) — **ese "0.06 m" resultó ser un artefacto, no una medición
+> real de convergencia**: el optimizador tenía el signo de su ecuación normal invertido, así
+> que cada paso empeoraba el ajuste en vez de mejorarlo, y el guardián `bestTransform` (que
+> descarta cualquier paso peor que el mejor visto) terminaba devolviendo la transformación
+> INICIAL del test sin ningún cambio — `result.transform` era bit a bit idéntico a
+> `initialGuess`. Corregido junto con un segundo bug relacionado (la rotación incremental
+> pivotaba en el origen del mundo en vez del centroide de las correspondencias activas). Con
+> ambos fixes: **error de traslación medido ≈1.9 mm** sobre el mismo test sintético (antes:
+> ≈62 mm, que no era más que el punto de partida sin corregir) — dentro de un factor ~2 del
+> objetivo de <1 mm del plan, y del mismo orden que el ruido de entrada inyectado en el test
+> (3 mm). Ver el hallazgo "signo invertido en la ecuación normal de Gauss-Newton", más abajo,
+> para la derivación matemática completa y la metodología que lo expuso.
+>
+> Sesión de seguimiento (17 ago 2026), en orden: (a) se confirmó que la Fase 3
+> (`App/Capture`, la capa que produciría una nube densa propia y mediría el ruido real del
+> sensor) sigue sin implementar — son directorios vacíos — así que la validación contra
+> hardware real sigue pendiente; el propio plan ya documenta el límite físico conocido (ruido
+> de profundidad ARKit ~1-2 cm a 1-2 m, §2.F riesgo 1); (b) se implementó correspondencia
+> punto→triángulo (antes: punto→vértice más cercano) en `ICPAligner`, medida como una
+> reducción del 76% en el error de cuantización de correspondencia sobre superficie curva; (c)
+> se encontró y corrigió el signo invertido de arriba, el hallazgo de mayor impacto de esta
+> sesión. `ICPAligner.computeConditionNumber` (antes también pendiente) ya usa el Hessiano
+> punto-a-plano real con normalización de escala y descomposición espectral en Double. La capa
+> `App/` (Fases 0, 3, 13, 14, 15 — Xcode, ARKit, UI) sigue completamente fuera de alcance: no
+> existe proyecto Xcode y no puede crearse ni probarse en este entorno Linux. El resumen
+> ejecutivo de abajo describe el estado **al momento de la auditoría original**, antes de los
+> fixes; se conserva sin editar como registro histórico de lo encontrado.
 
 ## Resumen ejecutivo
 
@@ -987,6 +997,116 @@ vértices — fuera de alcance de este ciclo),
 162/162 tests pasan.
 
 **Severidad:** Alta
+
+---
+
+**✅ Signo invertido en la ecuación normal de Gauss-Newton — el "0.06 m" de convergencia de
+ICP nunca fue tal: era el error del punto de partida del propio test, nunca corregido.**
+Descubierto mientras se armaba, a pedido del usuario, una comparación A/B del efecto real del
+Paso 2 (arriba) sobre la convergencia — no un hallazgo buscado deliberadamente, sino
+tropezado al instrumentar el ICP para medir con honestidad, siguiendo la misma metodología de
+"medir, no asumir" del resto de este documento.
+
+**Lo que se encontró:** instrumentando `align()` iteración por iteración sobre el propio test
+`recoversKnownTransform`, `result.transform` resultó ser **bit a bit idéntico** a
+`initialGuess` — ni la traslación ni la rotación cambiaban en absoluto. El rastro interno
+mostraba que el Gauss-Newton sí ejecutaba pasos reales, pero el RMSE **empeoraba en cada
+iteración desde la primera** (0.028 → 0.037 → 0.037 → 0.043 en las primeras 4 iteraciones
+medidas). El guardián `bestTransform` — agregado en la sesión anterior específicamente para
+"no dejar que un paso malo empeore el resultado" — hacía exactamente eso: como ningún paso
+posterior lograba un RMSE mejor que el de la transformación inicial (evaluada antes de
+aplicar cualquier paso), se quedaba con esa transformación inicial intacta. El test "pasaba"
+porque su punto de partida está a solo 6 cm de la verdad — un artefacto de cómo se construyó
+el test, no evidencia de convergencia. **Verificado que no es un bug introducido en este
+ciclo:** el mismo diagnóstico corrido contra el commit `416c387` (el de la sesión anterior,
+en un `git worktree` aislado) reprodujo el mismo resultado exacto — `identicalToInitial =
+true` ya estaba presente antes de cualquier cambio de esta sesión. La "mejora de 0.20 m a
+0.06 m" documentada en el hallazgo de "convergencia de ICP a menos de 1 mm" (arriba) fue una
+mejora real en la *búsqueda de correspondencias* (los 4 bugs ahí documentados), pero el
+"0.06 m" final nunca reflejó una convergencia real del optimizador — era, con alta
+probabilidad, casi enteramente el error residual del punto de inicialización del test.
+
+**Primer intento, insuficiente por sí solo:** la hipótesis inicial fue "brazo de palanca" —
+la actualización se compone como `transform = deltaTransform · transform` (multiplicación por
+la izquierda, en el frame global), así que `transform_new.translation = ΔR·transform.translation
++ Δt`: la rotación incremental gira la traslación YA ACUMULADA (aquí, ~0.9 m desde el origen)
+alrededor del origen del mundo, no del objeto. Con `maxStepR = 0.2 rad`, un giro incremental
+en el peor caso produce un desplazamiento espurio de hasta `0.9 × sin(0.2) ≈ 0.18 m` —
+mayor que `maxCorrespondenceDistance` (0.10 m), explicando el colapso de correspondencias
+observado entre iteraciones consecutivas (140 → 30 en un solo paso). Se corrigió pivotando la
+rotación incremental en el centroide de las correspondencias activas de cada iteración, no en
+el origen: `cross = (Rpᵢ + t − centroid) × n` en vez de `(Rpᵢ + t) × n`, y
+`Δt_efectivo = α + centroid − ΔR·centroid` en la reconstrucción de `deltaTransform` (derivación
+verificada dos veces: manualmente y por un agente independiente sin acceso al resto de este
+análisis, ambas derivaciones coinciden). Este fix por sí solo **no bastó** — medido: con el
+centrado aplicado pero sin lo que sigue, el RMSE seguía empeorando en cada iteración
+(0.028 → 0.053 → 0.051 → 0.059), solo que con una dirección de "salida" distinta. Se mantiene
+igual: es una corrección matemáticamente real y necesaria para robustez (sin ella, cualquier
+escena con traslación acumulada grande sigue expuesta al mismo efecto), aunque no era la causa
+dominante de la divergencia observada aquí.
+
+**Causa raíz real: signo invertido.** La ecuación normal de Gauss-Newton para minimizar
+Σ(eᵢ + Jᵢ·δ)² respecto a δ es `(ΣJᵢJᵢᵀ)·δ = −ΣJᵢ·eᵢ` — el signo negativo en el lado derecho es
+lo que hace que δ apunte en la dirección que *reduce* el residuo. El código acumulaba
+`JtE[r] += J[r]·residual` (es decir, `JtE = ΣJᵢ·eᵢ`, sin negar) y resolvía
+`solve6x6(JtJ, rhs: JtE)` — `JtJ·sol = JtE`, **sin el signo negativo** — usando `sol` (`alpha`,
+`omega`) directamente como el paso a aplicar. Con `H = JtJ` semidefinida positiva (usa
+`bestTransform`/`solve6x6` ya exige pivote no nulo, así que en la práctica definida positiva),
+`sol = H⁻¹·JtE` y el paso correcto es `−H⁻¹·JtE = −sol`: el código aplicaba sistemáticamente
+el **paso opuesto** al que minimiza el error, en cada iteración, desde siempre. La derivada
+direccional del error total a lo largo del paso aplicado es `2·JtE·sol = 2·JtEᵀH⁻¹JtE ≥ 0`
+(positiva salvo en el mínimo exacto) — matemáticamente garantizado que el paso aplicado
+*aumenta* el error a primer orden, sin importar el damping o el pivote de rotación. Esto
+explica por completo por qué el fix de centrado (arriba) no bastó: no importa dónde pivote la
+rotación si la dirección del paso ya está invertida. Confirmado por partida doble:
+verificación matemática manual (dos derivaciones independientes) y verificación por un agente
+separado sin contexto del resto de esta investigación, ambas coincidiendo en la misma
+conclusión y la misma corrección. Verificado también empíricamente antes de aplicar el fix
+definitivo: negar `sol` como prueba aislada, antes de formalizar el cambio, hizo que el primer
+paso pasara de *empeorar* el RMSE a *mejorarlo* drásticamente (0.028 → 0.0023 en la primera
+iteración, con y sin el fix de centrado aplicado en paralelo).
+
+**Fix aplicado:** `solve6x6(JtJ, rhs: JtE.map { -$0 })` — se niega el lado derecho antes de
+resolver, dejando la acumulación de `JtE` sin tocar (más legible mantener `JtE = ΣJᵢeᵢ` con su
+significado de "gradiente" intacto, y negar solo en el punto donde se resuelve el sistema).
+
+**Resultado medido**, mismo test, mismo punto de partida, ambos fixes de esta sección
+aplicados juntos (centrado + signo): error de traslación final **≈1.9 mm** (antes: idéntico al
+punto de partida, ≈62 mm) — con ruido de entrada inyectado de 3 mm, un resultado del mismo
+orden que el propio piso de ruido del test, y dentro de un factor ~2 del objetivo de <1 mm del
+plan. `RegistrationTests.recoversKnownTransform` actualizado: tolerancia de `<0.1 m` a
+`<0.005 m` (margen real sobre lo medido, no la tolerancia floja que tenía antes), comentario
+reescrito con el historial completo de las dos rondas de fixes. Suite completa: 162/162 tests
+pasan, sin ninguna otra regresión — el resto de los tests de ICP usaban tolerancias laxas o
+manejo de excepción silencioso que nunca ejercitó esta ruta de forma estricta.
+
+**Sobre `bestTransform` y el diseño a futuro:** el guardián que enmascaró este bug durante dos
+sesiones sigue siendo una buena práctica de defensa en profundidad (protege contra
+correspondencias ruidosas, escenas casi degeneradas, mala inicialización) y se mantiene sin
+cambios — pero pasa de ser, en la práctica, *el resultado real* (porque el optimizador nunca
+mejoraba nada) a ser una red de seguridad genuina sobre un optimizador que ahora sí converge.
+Recomendación no aplicada en este ciclo, para una futura ronda: Levenberg-Marquardt con
+backtracking real (probar el paso contra el RMSE no linealizado antes de aceptarlo; si
+empeora, subir el damping y reintentar en la misma iteración en vez de aplicar y recién
+detectar el daño en la iteración siguiente) daría una capa adicional de robustez ahora que la
+dirección del paso es correcta — no era necesario para resolver la divergencia observada aquí
+(el signo por sí solo la explica), pero es la práctica estándar recomendada en la literatura
+(Pomerleau, Colas & Siegwart, 2015) para escenas peor condicionadas que este test sintético.
+
+**Metodología:** este hallazgo es el tercer caso en este documento donde una tolerancia floja
+o un guardián de emergencia ocultó un bug de fondo durante más de una sesión (los otros dos:
+el bug de traspuesta en `Matrix3x3`/`Matrix4x4` y la cadena de 4 bugs de correspondencia). El
+patrón que los expone siempre es el mismo: verificar el resultado NUMÉRICO exacto contra un
+caso trivial (aquí, `result.transform == initialGuess`), no solo si la aserción del test pasa.
+
+**Archivos:** `Sources/Registration/ICPAligner.swift` (centroide de pivote para la rotación
+incremental; signo corregido en la resolución del sistema 6×6),
+`Tests/RegistrationTests/RegistrationTests.swift` (tolerancia de `recoversKnownTransform`
+ajustada de `<0.1 m` a `<0.005 m`, comentario con el historial completo). Suite completa:
+162/162 tests pasan.
+
+**Severidad:** Bloqueante (el resultado central del módulo de registro no era el que se
+reportaba)
 
 **a) *"ICP: recupera transformación conocida con ruido de 3 mm"*** — el criterio del plan
 (§3, F11) pide recuperar una transformación de 0.85 m / 12.7° con ruido de 3 mm, dentro de

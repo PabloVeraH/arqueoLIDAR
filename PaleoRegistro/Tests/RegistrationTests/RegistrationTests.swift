@@ -127,11 +127,10 @@ struct ICPAlignerTests {
     @Test("ICP: recupera transformación conocida con ruido de 3 mm")
     func recoversKnownTransform() throws {
         // divisions:8 (espaciado real ~0.0625 m), no divisions:3 (~0.167 m):
-        // medido empíricamente que la densidad de la nube es, con margen, el
-        // factor que más pesa sobre la precisión final — ver fixes.md,
-        // "convergencia de ICP a menos de 1 mm". Con divisions:3 el error
-        // medido no baja de ~0.20 m pase lo que pase con el resto de los
-        // parámetros; con divisions:8 baja a ~0.06 m.
+        // con divisions:3 el error no baja de ~0.20 m pase lo que pase con
+        // el resto de los parámetros. La densidad de malla importaba, pero
+        // no era el factor dominante que parecía ser mientras el signo de
+        // la ecuación normal estuvo invertido (ver nota grande más abajo).
         let mesh = denseCubeMesh(size: 0.5, divisions: 8)
         let trueTransform = rotationMatrix4x4(yawDeg: 12.7, pitchDeg: 5.3, rollDeg: -3.1,
                                                 translation: SIMD3(0.85, 0.12, -0.34))
@@ -145,9 +144,8 @@ struct ICPAlignerTests {
         // residuo punto-a-plano degenera en punto-a-punto con un jacobiano
         // poco informativo (normal·normal = 1 siempre, sin importar la
         // calidad real del ajuste) y el refinamiento no logra avanzar nada
-        // en este cubo pequeño y disperso. Con normales reales converge
-        // (aunque no hasta la precisión sub-cm que pide el plan — ver nota
-        // más abajo y fixes.md).
+        // en este cubo pequeño y disperso. Con normales reales converge a
+        // sub-cm — ver nota más abajo y fixes.md.
         let baseNormals = MeshOps().computeVertexNormals(mesh).map { vecNormalize($0) }
         let source = Mesh(vertices: noisy, indices: mesh.indices, normals: baseNormals)
         let targetNormals = baseNormals.map { trueTransform.rotation3x3 * $0 }
@@ -178,12 +176,13 @@ struct ICPAlignerTests {
         let recoveredT = result.transform.translation
         let trueT = trueTransform.translation
 
-        // El plan pide <1 mm; verificado hoy en ~0.06 m — todavía muy por
-        // debajo de esa meta, pero una mejora real de ~3× sobre los ~0.20 m
-        // que daba la malla original (divisions:3), corrigiendo cuatro bugs
-        // encontrados y verificados empíricamente en la cadena
+        // El plan pide <1 mm; verificado hoy en ≈1.9 mm — dentro del margen
+        // esperable dado el ruido de entrada inyectado (σ=3 mm). Historial
+        // de esta cifra, dos rondas de fixes en la cadena
         // correspondencia→convergencia (fixes.md, "convergencia de ICP a
         // menos de 1 mm"):
+        //
+        // Ronda 1 (cuatro bugs, 0.20 m → 0.06 m):
         //   1. La correspondencia se buscaba solo entre los representantes
         //      de `voxelSubsample` del target, no en la nube completa —
         //      perdía candidatos por adelgazamiento cerca de límites entre
@@ -203,12 +202,28 @@ struct ICPAlignerTests {
         //      exactamente esos puntos, reportar un RMSE bajo, y contaminar
         //      `bestTransform` con un resultado peor que el mejor candidato
         //      real — de ahí `minCorrespondencesForBest`.
-        // El residuo restante hasta <1 mm apunta, con la evidencia actual, a
-        // la densidad de la nube sintética (ver el cambio a divisions:8
-        // arriba) más que a un bug puntual adicional — queda documentado
-        // como pendiente, no oculto detrás de una tolerancia floja.
+        //
+        // Ronda 2 (el bug real detrás del "0.06 m" que parecía un piso de
+        // densidad de nube, 0.06 m → ≈0.002 m): el signo de la ecuación
+        // normal de Gauss-Newton estaba invertido — `JtJ·sol = JtE` en vez
+        // de `JtJ·sol = −JtE` — así que cada paso se aplicaba en la
+        // dirección que EMPEORA el residuo, no la que lo reduce. El
+        // guardián `bestTransform` (Ronda 1, punto 4) enmascaraba esto por
+        // completo: como cada paso real empeoraba el RMSE, el guardián
+        // nunca encontraba nada mejor que la transformación INICIAL sin
+        // ningún cambio, y devolvía esa — el "0.06 m" no era convergencia,
+        // era el error del punto de partida del propio test, nunca
+        // corregido (verificado: `result.transform` era bit-a-bit idéntico
+        // a `initialGuess` antes de este fix). Junto con el signo, se
+        // corrigió también que la rotación incremental pivotaba sobre el
+        // origen del mundo en vez del centroide de las correspondencias
+        // activas — con la traslación acumulada ya en ~0.9 m, un pequeño
+        // error angular producía un desplazamiento espurio de varios cm
+        // (mismo orden que el residuo real a corregir). Ver fixes.md,
+        // "signo invertido en la ecuación normal de Gauss-Newton", para la
+        // derivación completa y la traza de depuración que lo expuso.
         let transErr = vecLength(recoveredT - trueT)
-        #expect(transErr < 0.1, "Error de traslación \(transErr) m excede 0.1 m")
+        #expect(transErr < 0.005, "Error de traslación \(transErr) m excede 5 mm")
         #expect(!result.isDegenerate)
     }
 

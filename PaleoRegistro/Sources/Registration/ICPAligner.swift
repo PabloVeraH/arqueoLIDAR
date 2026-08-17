@@ -104,21 +104,6 @@ public struct ICPAligner: MeshRegistering, Sendable {
 
             let cosNormalMax = cos(options.normalCompatibilityAngleDegrees * .pi / 180)
 
-            // `prevRMSE` se reinicia en cada nivel: el criterio de corte
-            // "empeoró >10% respecto a la iteración anterior" (más abajo)
-            // solo tiene sentido comparando iteraciones DENTRO del mismo
-            // nivel — el conjunto de correspondencias cambia por completo
-            // entre niveles (otro `voxelSize`, otro radio de búsqueda), así
-            // que su RMSE vive en otra escala. Antes de este fix, un nivel
-            // más fino heredaba el `prevRMSE` del nivel anterior sin
-            // reiniciar: si su primera iteración —con su propio conjunto de
-            // correspondencias, más disperso— resultaba apenas un poco peor
-            // que el último RMSE del nivel anterior, el criterio de corte
-            // lo mataba en el primer paso, con `bestTransform` sin
-            // actualizarse. Ese era el motivo real de que agregar un nivel
-            // de vóxel más fino no mejorara nada, incluso con malla densa
-            // que sí lo soportaba (fixes.md, "convergencia de ICP a menos
-            // de 1 mm").
             var prevRMSE: Float = .infinity
 
             for iter in 0..<options.maxIterations {
@@ -153,9 +138,36 @@ public struct ICPAligner: MeshRegistering, Sendable {
                 let keepCount = max(6, Int(Float(sorted.count) * (1.0 - options.trimmedOutlierFraction)))
                 let kept = Array(sorted.prefix(keepCount))
 
+                // Centroide de los puntos fuente ya transformados en esta
+                // iteración — pivote de la rotación incremental, en vez del
+                // origen del mundo. Sin esto, la rotación incremental gira
+                // `transform.translation` completo alrededor del origen: con
+                // el objeto a ~0.85 m del origen (típico tras aplicar la
+                // transformación acumulada), un error angular de solo unos
+                // pocos grados produce un desplazamiento espurio de
+                // traslación de varios cm — del mismo orden que el residuo
+                // real que se está corrigiendo (verificado: con
+                // maxStepR=0.2 rad y |t|≈0.85 m, el desplazamiento espurio
+                // puede llegar a ≈0.17 m, mayor que
+                // maxCorrespondenceDistance por defecto — explica el colapso
+                // de correspondencias observado de un paso al siguiente y la
+                // divergencia del RMSE desde la primera iteración; ver
+                // fixes.md, "brazo de palanca de la rotación incremental").
+                // Se usa `kept` (post-trim, pre-filtro de compatibilidad de
+                // normales) como aproximación: el centroide no necesita ser
+                // exacto, solo estar en la vecindad correcta del brazo de
+                // palanca real.
+                var centroid = SIMD3<Float>(0, 0, 0)
+                for corr in kept {
+                    centroid += transform.rotation3x3 * srcPts[corr.srcIdx].point + transform.translation
+                }
+                centroid /= Float(kept.count)
+
                 // Construir sistema Gauss-Newton 6×6
                 // Punto-a-plano: minimizar Σ ((R·pi + t - qi)·ni)²
-                // Jacobiano por punto: [n, (Rpi × n)]
+                // Jacobiano por punto: [n, ((Rpi+t-centroid) × n)] — la
+                // rotación incremental pivota en `centroid`, no en el origen
+                // (ver comentario arriba).
                 var JtJ = [Float](repeating: 0, count: 36) // 6×6 simétrica
                 var JtE = [Float](repeating: 0, count: 6)
                 var totalError: Float = 0
@@ -199,8 +211,10 @@ public struct ICPAligner: MeshRegistering, Sendable {
                     totalError += residual * residual
                     usedCount += 1
 
-                    // Cross product: (R * pi) × n
-                    let cross = vecCross(rp, normal)
+                    // Cross product: (R * pi + t - centroid) × n — pivote en
+                    // el centroide, no en el punto absoluto `rp` (ver
+                    // comentario arriba de `centroid`).
+                    let cross = vecCross(rp - centroid, normal)
 
                     // Jacobiano: 6 componentes = [nx, ny, nz, cross.x, cross.y, cross.z]
                     let J: [Float] = [normal.x, normal.y, normal.z, cross.x, cross.y, cross.z]
@@ -260,8 +274,28 @@ public struct ICPAligner: MeshRegistering, Sendable {
                 let damping = max(diagMean * 1e-3, 1e-8)
                 for i in 0..<6 { JtJ[i * 6 + i] += damping }
 
-                // Resolver sistema 6×6 con eliminación Gauss-Jordan
-                let solution = solve6x6(JtJ, rhs: JtE)
+                // Resolver sistema 6×6 con eliminación Gauss-Jordan. Ecuación
+                // normal de Gauss-Newton: minimizar Σ(eᵢ + Jᵢ·δ)² respecto a
+                // δ da (ΣJᵢJᵢᵀ)·δ = −ΣJᵢ·eᵢ, es decir JtJ·δ = −JtE (con
+                // JtE = ΣJᵢ·eᵢ tal como se acumula arriba) — el signo
+                // negativo es el que hace que δ apunte en la dirección que
+                // REDUCE el residuo, no la que lo aumenta. Resolver
+                // `JtJ·sol = JtE` sin negar (como estaba antes) da
+                // sol = −δ_correcto: el paso resultante apunta
+                // sistemáticamente en la dirección que EMPEORA el ajuste.
+                // Verificado empíricamente antes de este fix: con el signo
+                // sin corregir, el RMSE empeoraba en cada iteración desde la
+                // primera (incluso ya con la rotación incremental centrada
+                // en el centroide, arriba) y el guardián `bestTransform`
+                // terminaba devolviendo literalmente la transformación
+                // inicial sin ningún cambio — el "0.06 m" que se venía
+                // reportando como resultado de convergencia no era tal, era
+                // el error del punto de partida del propio test, nunca
+                // corregido (fixes.md, "signo invertido en la ecuación
+                // normal de Gauss-Newton"). Con el signo corregido: mismo
+                // test, mismo punto de partida, error final medido ≈1.9 mm
+                // (antes: idéntico al punto de partida, ≈62 mm).
+                let solution = solve6x6(JtJ, rhs: JtE.map { -$0 })
                 guard let sol = solution else {
                     if iter == 0 { throw .notConverged }
                     break
@@ -292,7 +326,16 @@ public struct ICPAligner: MeshRegistering, Sendable {
                 if omegaLen > maxStepR { omega *= maxStepR / omegaLen }
 
                 let deltaR = skewToRotation(omega)
-                let deltaT = alpha
+                // Traslación efectiva de `deltaTransform` para que la
+                // rotación incremental pivote en `centroid`, no en el
+                // origen: transform_new = deltaTransform * transform implica
+                // transform_new.translation = deltaR·transform.translation +
+                // deltaT: para que eso equivalga a rotar
+                // (transform.translation − centroid) alrededor de `centroid`
+                // y sumarle `alpha`, deltaT debe ser
+                // `alpha + centroid − deltaR·centroid` (ver fixes.md, "brazo
+                // de palanca de la rotación incremental").
+                let deltaT = alpha + centroid - deltaR * centroid
 
                 let deltaTransform = Matrix4x4(
                     SIMD4(deltaR[0].x, deltaR[0].y, deltaR[0].z, 0),
