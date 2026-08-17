@@ -126,7 +126,13 @@ struct ICPAlignerTests {
 
     @Test("ICP: recupera transformación conocida con ruido de 3 mm")
     func recoversKnownTransform() throws {
-        let mesh = denseCubeMesh(size: 0.5, divisions: 3)
+        // divisions:8 (espaciado real ~0.0625 m), no divisions:3 (~0.167 m):
+        // medido empíricamente que la densidad de la nube es, con margen, el
+        // factor que más pesa sobre la precisión final — ver fixes.md,
+        // "convergencia de ICP a menos de 1 mm". Con divisions:3 el error
+        // medido no baja de ~0.20 m pase lo que pase con el resto de los
+        // parámetros; con divisions:8 baja a ~0.06 m.
+        let mesh = denseCubeMesh(size: 0.5, divisions: 8)
         let trueTransform = rotationMatrix4x4(yawDeg: 12.7, pitchDeg: 5.3, rollDeg: -3.1,
                                                 translation: SIMD3(0.85, 0.12, -0.34))
 
@@ -158,12 +164,13 @@ struct ICPAlignerTests {
         let initialGuess = rotationMatrix4x4(yawDeg: 12.7 + 3, pitchDeg: 5.3 - 1, rollDeg: -3.1 + 1,
                                               translation: SIMD3(0.85 + 0.05, 0.12 - 0.02, -0.34 + 0.03))
 
-        // Mismos tamaños de vóxel que el test de convergencia desde 20° de
-        // abajo (ya validado con esta misma malla de 0.5 m/divisions:3,
-        // cuyo espaciado real entre vértices es ~0.167 m): un vóxel de 0.02
-        // da un radio de búsqueda de correspondencias (hash cellSize =
-        // voxelSize·2 = 0.04) menor que ese espaciado, y el ICP se queda sin
-        // correspondencias reales para casi todos los puntos.
+        // Un nivel de vóxel más fino que 0.05 (ej. 0.02) no aporta nada con
+        // esta densidad de malla — verificado: el nivel más fino nunca junta
+        // más de ~9 correspondencias (contra las ~18 que exige
+        // `minCorrespondencesForBest` en `align()` para que un candidato
+        // cuente como "mejor"), así que no llega a contribuir. Haría falta
+        // una nube considerablemente más densa que la de este test sintético
+        // para que un vóxel de 0.02 tuviera datos suficientes de verdad.
         let options = ICPOptions(voxelSizes: [0.1, 0.05], maxIterations: 50)
         let result = try aligner.align(source: source, target: target, initial: initialGuess, options: options)
 
@@ -171,19 +178,37 @@ struct ICPAlignerTests {
         let recoveredT = result.transform.translation
         let trueT = trueTransform.translation
 
-        // El plan pide <1 mm; verificado hoy en 0.20 m — muy por debajo de
-        // esa meta. La corrección del bug de ejes/traspuesta en
-        // Matrix3x3/Matrix4x4 (fixes.md, Domain/MathTypes.swift) fue lo que
-        // hizo que ICPAligner convergiera de verdad por primera vez (antes,
-        // cualquier composición transform=delta*transform quedaba
-        // corrompida y el resultado no se movía del punto inicial). La
-        // precisión sub-cm que falta parece un problema de conditioning
-        // adicional (nearest-neighbor entre caras de un cubo, pocas
-        // correspondencias) que queda documentado en fixes.md como
-        // pendiente, no oculto detrás de una tolerancia artificialmente
-        // floja.
+        // El plan pide <1 mm; verificado hoy en ~0.06 m — todavía muy por
+        // debajo de esa meta, pero una mejora real de ~3× sobre los ~0.20 m
+        // que daba la malla original (divisions:3), corrigiendo cuatro bugs
+        // encontrados y verificados empíricamente en la cadena
+        // correspondencia→convergencia (fixes.md, "convergencia de ICP a
+        // menos de 1 mm"):
+        //   1. La correspondencia se buscaba solo entre los representantes
+        //      de `voxelSubsample` del target, no en la nube completa —
+        //      perdía candidatos por adelgazamiento cerca de límites entre
+        //      caras.
+        //   2. El radio de búsqueda del hash espacial (`cellSize =
+        //      voxelSize·2`, vecindario 3×3×3) se achicaba en cada nivel más
+        //      fino independientemente de `maxCorrespondenceDistance` — un
+        //      nivel fino podía quedar con un radio de captura menor al que
+        //      el propio `ICPOptions` prometía.
+        //   3. `prevRMSE` (criterio de corte "empeoró >10%") no se
+        //      reiniciaba entre niveles de vóxel — comparaba el RMSE de un
+        //      nivel fino (otro conjunto de correspondencias, otra escala de
+        //      residuo) contra el último RMSE del nivel anterior, matando el
+        //      nivel fino en su primera iteración.
+        //   4. Al corregir 2 y 3, un nivel fino con muy pocas
+        //      correspondencias (ej. 9, para 6 incógnitas) podía sobreajustar
+        //      exactamente esos puntos, reportar un RMSE bajo, y contaminar
+        //      `bestTransform` con un resultado peor que el mejor candidato
+        //      real — de ahí `minCorrespondencesForBest`.
+        // El residuo restante hasta <1 mm apunta, con la evidencia actual, a
+        // la densidad de la nube sintética (ver el cambio a divisions:8
+        // arriba) más que a un bug puntual adicional — queda documentado
+        // como pendiente, no oculto detrás de una tolerancia floja.
         let transErr = vecLength(recoveredT - trueT)
-        #expect(transErr < 0.25, "Error de traslación \(transErr) m excede 0.25 m")
+        #expect(transErr < 0.1, "Error de traslación \(transErr) m excede 0.1 m")
         #expect(!result.isDegenerate)
     }
 

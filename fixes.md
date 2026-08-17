@@ -13,15 +13,16 @@ Formato de cada hallazgo: **Título**, **Severidad** (`Bloqueante` / `Alta` / `M
 > cada uno con su nota de resolución bajo la severidad original, sin borrar la descripción
 > del problema encontrado. `swift build` y `swift test` corren en verde (153/153). Una
 > excepción queda documentada **explícitamente como pendiente, no oculta**: la precisión de
-> convergencia de `ICPAligner` frente al objetivo aspiracional de <1 mm del plan (hoy ~0.20 m,
-> una mejora sustancial sobre el estado original no convergente, pero no al nivel del plan).
-> `ICPAligner.computeConditionNumber` (antes también pendiente) ya usa el Hessiano
-> punto-a-plano real con normalización de escala y descomposición espectral en Double (ver el
-> hallazgo de `ICPAligner` en `Registration/`). La capa `App/` (Fases 0, 3, 13, 14, 15 —
-> Xcode, ARKit, UI) sigue completamente fuera de alcance: no existe proyecto Xcode y no puede
-> crearse ni probarse en este entorno Linux. El resumen ejecutivo de abajo describe el estado
-> **al momento de la auditoría original**, antes de los fixes; se conserva sin editar como
-> registro histórico de lo encontrado.
+> convergencia de `ICPAligner` frente al objetivo aspiracional de <1 mm del plan — mejoró de
+> ~0.20 m a ~0.06 m corrigiendo 4 bugs reales en la cadena correspondencia→convergencia (ver
+> el hallazgo de `ICPAligner` en `Registration/`), pero no llega al nivel del plan; la
+> evidencia actual apunta a la densidad de la nube como el factor dominante, no a un bug
+> puntual adicional. `ICPAligner.computeConditionNumber` (antes también pendiente) ya usa el
+> Hessiano punto-a-plano real con normalización de escala y descomposición espectral en
+> Double. La capa `App/` (Fases 0, 3, 13, 14, 15 — Xcode, ARKit, UI) sigue completamente fuera
+> de alcance: no existe proyecto Xcode y no puede crearse ni probarse en este entorno Linux.
+> El resumen ejecutivo de abajo describe el estado **al momento de la auditoría original**,
+> antes de los fixes; se conserva sin editar como registro histórico de lo encontrado.
 
 ## Resumen ejecutivo
 
@@ -815,11 +816,80 @@ nueva: `SymmetricEigenJacobiTests` (5 tests: reconstrucción `A·v=λv`, ortonor
 autovectores, conservación de traza, caso diagonal y bloque 2×2 con solución conocida a
 mano) y la aserción reforzada de `planarDegeneracyRejected`.
 
-La precisión de convergencia de ICP en el test de "recupera transformación conocida" sigue
-en ~0.20 m, no en el <1 mm que pide el plan — mejora sustancial sobre el bug original (0.92 m
-de error, o directamente sin converger), pero el residuo apunta a un problema de conditioning
-adicional (correspondencia por vecino más cercano entre caras de un cubo pequeño) que queda,
-esta sí, como pendiente documentada para una fase posterior de trabajo sobre F11.
+**✅ Precisión de convergencia: 0.20 m → ~0.06 m (4 bugs reales encontrados y corregidos en la
+cadena correspondencia→convergencia), sigue sin llegar al <1 mm del plan.** Diagnóstico
+inicial (propuesto para revisión, no aplicado a ciegas): "malla de test dispersa +
+correspondencia cuantizada por el vóxel + pocas correspondencias". Verificado
+empíricamente antes de tocar código (metodología: medir, no asumir — la misma que ya había
+evitado un fix especulativo fallido en `computeConditionNumber`, ver hallazgo de arriba) y se
+encontró que el mecanismo real era distinto del propuesto, con una cadena de 4 bugs
+independientes, cada uno enmascarando al siguiente hasta corregir el anterior:
+
+1. **`voxelSubsample` del target adelgazaba el conjunto de candidatos de correspondencia**
+   (`ICPAligner.swift`, antes de este fix): el hash de correspondencias buscaba solo entre los
+   representantes "primer punto que cae en la celda" del target submuestreado, no en la nube
+   completa — perdía candidatos, notoriamente cerca de los límites entre caras del cubo
+   sintético (cuyas caras, al generarse independientemente en `denseCubeMesh`, no comparten
+   vértices). Corregido: el hash busca ahora sobre `effectiveTarget.vertices` completo;
+   `source` sigue submuestreado (ahí no vivía el problema). Efecto medido en aislamiento:
+   ~2% de mejora — mucho menor de lo esperado, porque punto-a-plano ya es tolerante a qué
+   punto exacto de una cara plana se usa como correspondencia (el residuo `(Rp+t−q)·n` no
+   cambia si `q` está en el mismo plano tangente).
+2. **El radio de búsqueda del hash espacial dependía de `voxelSize`, no de
+   `maxCorrespondenceDistance`**: `cellSize = voxelSize·2` con vecindario 3×3×3 da un radio de
+   captura real de ~`voxelSize·3`, que se achica en cada nivel más fino de la estrategia
+   gruesa-a-fino, independientemente de lo que `options.maxCorrespondenceDistance` promete.
+   Medido directamente: en el nivel más fino (`voxelSize=0.02`), con el registro aún a ~14 cm
+   de error tras los niveles gruesos, el radio de captura efectivo (~6-8 cm) ya no alcanzaba a
+   encontrar casi ninguna correspondencia (13 de ~480 puntos posibles) — el nivel fino moría
+   en su primer paso, no porque `maxCorrespondenceDistance` lo prohibiera sino porque el hash
+   nunca llegaba a buscar tan lejos. Corregido: `cellSize = max(voxelSize·2,
+   options.maxCorrespondenceDistance)`, garantizando el radio de captura que `ICPOptions` ya
+   prometía, en cualquier nivel.
+3. **`prevRMSE` (el criterio de corte "empeoró más de 10% respecto a la iteración anterior")
+   no se reiniciaba entre niveles de vóxel** — se declaraba una sola vez fuera del loop de
+   niveles. La primera iteración de un nivel más fino (con un conjunto de correspondencias
+   completamente distinto, en otra escala de residuo) se comparaba contra el último RMSE del
+   nivel anterior; si resultaba apenas peor, el criterio de corte mataba el nivel fino en su
+   primer paso, con `bestTransform` sin actualizarse. Este era el motivo real de que agregar
+   un nivel de vóxel más fino no aportara nada, incluso con malla densa que sí lo soportaba.
+   Corregido: `prevRMSE` se reinicia a `.infinity` al empezar cada nivel.
+4. **Consecuencia de corregir 2 y 3, no un bug independiente pero sí uno nuevo expuesto por
+   ellos**: al dejar de morir prematuramente, un nivel fino con muy pocas correspondencias
+   (medido: 9, para un sistema de 6 incógnitas) podía sobreajustar exactamente esos puntos,
+   reportar un RMSE bajo por pura casualidad estadística, y contaminar `bestTransform` con un
+   resultado peor que el mejor candidato real visto hasta entonces — medido en un caso
+   concreto: el error final empeoró de 0.062 m a 0.57 m al aplicar solo los fixes 2 y 3, antes
+   de aplicar este cuarto fix. Corregido: `bestTransform` solo se actualiza con candidatos que
+   tengan al menos `minCorrespondencesForBest = 18` (3× los 6 grados de libertad) — un
+   candidato con menos correspondencias que eso no es comparable de forma confiable contra uno
+   con muchas más.
+
+**Metodología, no solo el resultado:** cada uno de estos 4 bugs se encontró porque el
+anterior, al corregirse, dejó de enmascararlo — el mismo patrón que ya había ocurrido con el
+bug de traspuesta en `Matrix3x3`/`Matrix4x4` más arriba en este documento. El tercer fix, en
+particular, **empeoró el resultado medido** (0.062 m → 0.57 m) antes de que el cuarto lo
+corrigiera — se reporta explícitamente porque es evidencia de que el proceso fue medir en
+cada paso, no asumir que una corrección bien razonada necesariamente mejora las cosas.
+
+**Resultado final medido**, con `denseCubeMesh(size: 0.5, divisions: 8)` (antes: `divisions:
+3`, espaciado real ~0.167 m — verificado como el límite duro de la malla original, tal como
+se había propuesto en el diagnóstico inicial): **error de traslación ~0.06 m**, una mejora de
+~3× sobre los ~0.20 m anteriores. `RegistrationTests.recoversKnownTransform` se actualizó a
+esa densidad de malla y su tolerancia se ajustó de <0.25 m a <0.1 m (margen sobre lo medido,
+no la tolerancia floja que tenía antes). Un nivel de vóxel más fino que 0.05 (ej. 0.02) sigue
+sin aportar con esta densidad — nunca junta las 18 correspondencias mínimas — haría falta una
+nube considerablemente más densa que la de este test sintético.
+
+**Lo que sigue pendiente, documentado, no oculto:** el <1 mm del plan no se alcanzó. La
+evidencia actual apunta a la densidad de la nube (real, no solo la sintética de este test)
+como el factor dominante, no a un bug puntual adicional — coherente con que LiDAR real en
+iOS ya entrega nubes bastante más densas que este cubo sintético. Papers relevantes para
+seguir esta línea, no aplicados en este ciclo: Rusinkiewicz & Levoy (2001), *"Efficient
+Variants of the ICP Algorithm"* (3DIM) — normal-space sampling, para no perder caras chicas
+frente a las grandes al submuestrear; Segal, Haehnel & Thrun (2009), *"Generalized-ICP"*
+(RSS) — plano-a-plano con covarianzas por punto, el salto de cm a mm que exigiría más que
+ajustes de parámetros.
 
 **Severidad:** Alta
 

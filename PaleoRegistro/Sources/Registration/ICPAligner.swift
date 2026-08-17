@@ -29,7 +29,6 @@ public struct ICPAligner: MeshRegistering, Sendable {
         let effectiveTarget = applyStableMask(target, mask: stableRegionMask)
 
         var transform = initial
-        var prevRMSE: Float = .infinity
 
         // El update de Gauss-Newton se aplica siempre, incluso si el sistema
         // 6×6 está mal condicionado y produce un paso malo — el único freno
@@ -50,16 +49,67 @@ public struct ICPAligner: MeshRegistering, Sendable {
             // de normales *sin submuestrear*: dos espacios de índices
             // distintos que no tienen relación entre sí).
             let srcPts = voxelSubsample(source.vertices, cellSize: voxelSize)
-            let tgtPts = voxelSubsample(effectiveTarget.vertices, cellSize: voxelSize)
 
             let tgtHasNormals = effectiveTarget.normals != nil
 
-            guard srcPts.count >= 10, tgtPts.count >= 10 else { continue }
+            guard srcPts.count >= 10, effectiveTarget.vertices.count >= 10 else { continue }
 
-            // Construir hash espacial para la nube target
-            let targetHash = SpatialHash(points: tgtPts.map(\.point), cellSize: voxelSize * 2)
+            // Hash espacial sobre el target COMPLETO, no submuestreado
+            // (fixes.md, "convergencia de ICP a menos de 1 mm"): punto-a-
+            // plano es tolerante a qué punto exacto de una cara plana se
+            // use como correspondencia — el residuo (Rp+t−q)·n es el mismo
+            // sin importar cuál punto de esa misma cara se elija como `q`,
+            // porque todos están en el mismo plano tangente. Donde SÍ
+            // importa es cerca de aristas/esquinas: `voxelSubsample`
+            // (submuestreo "primer punto que cae en la celda") podía
+            // devolver, como representante de una celda cercana a una
+            // arista, un vértice de la cara vecina — con una normal muy
+            // distinta, contaminando el Jacobiano de esa correspondencia.
+            // Buscar en el arreglo completo (el hash sigue siendo O(1)
+            // amortizado; solo cambia el conjunto de candidatos, no el
+            // algoritmo de búsqueda) elimina esa pérdida de candidatos por
+            // adelgazamiento. `source` sigue submuestreado — no es donde
+            // vivía el problema, y sigue siendo el control de cuántos
+            // puntos se transforman/emparejan por iteración.
+            //
+            // El tamaño de celda del hash NO puede derivarse solo de
+            // `voxelSize`: `nearest()` busca en un vecindario de 3×3×3
+            // celdas, así que su radio de captura real es ~cellSize (en el
+            // peor caso, un punto en el borde de su celda). Con
+            // `cellSize = voxelSize*2` (como antes), ese radio se achica a
+            // la par de cada nivel más fino — en el nivel más fino
+            // (ej. 0.02) puede terminar bastante por debajo de
+            // `options.maxCorrespondenceDistance` (ej. 0.10), que es el
+            // radio que el llamador cree que está pidiendo. El síntoma
+            // medido: si el nivel anterior deja el error de registro más
+            // lejos que ese radio recortado, el nivel fino encuentra casi
+            // ninguna correspondencia y muere en su primer paso — no
+            // porque `maxCorrespondenceDistance` lo prohíba, sino porque el
+            // hash nunca llega a buscar tan lejos (fixes.md, "convergencia
+            // de ICP a menos de 1 mm"). El tamaño de celda ahora garantiza
+            // un radio de captura de al menos `maxCorrespondenceDistance`
+            // en cualquier nivel, independiente de `voxelSize`.
+            let hashCellSize = max(voxelSize * 2, options.maxCorrespondenceDistance)
+            let targetHash = SpatialHash(points: effectiveTarget.vertices, cellSize: hashCellSize)
 
             let cosNormalMax = cos(options.normalCompatibilityAngleDegrees * .pi / 180)
+
+            // `prevRMSE` se reinicia en cada nivel: el criterio de corte
+            // "empeoró >10% respecto a la iteración anterior" (más abajo)
+            // solo tiene sentido comparando iteraciones DENTRO del mismo
+            // nivel — el conjunto de correspondencias cambia por completo
+            // entre niveles (otro `voxelSize`, otro radio de búsqueda), así
+            // que su RMSE vive en otra escala. Antes de este fix, un nivel
+            // más fino heredaba el `prevRMSE` del nivel anterior sin
+            // reiniciar: si su primera iteración —con su propio conjunto de
+            // correspondencias, más disperso— resultaba apenas un poco peor
+            // que el último RMSE del nivel anterior, el criterio de corte
+            // lo mataba en el primer paso, con `bestTransform` sin
+            // actualizarse. Ese era el motivo real de que agregar un nivel
+            // de vóxel más fino no mejorara nada, incluso con malla densa
+            // que sí lo soportaba (fixes.md, "convergencia de ICP a menos
+            // de 1 mm").
+            var prevRMSE: Float = .infinity
 
             for iter in 0..<options.maxIterations {
                 // Transformar source points
@@ -69,9 +119,14 @@ public struct ICPAligner: MeshRegistering, Sendable {
                 var correspondences: [(srcIdx: Int, tgtPt: SIMD3<Float>, srcOriginalIdx: Int, tgtOriginalIdx: Int)] = []
                 for (i, sp) in srcTransformed.enumerated() {
                     if let tgtIdx = targetHash.nearest(to: sp) {
-                        let diff = vecLength(sp - tgtPts[tgtIdx].point)
+                        // `tgtIdx` ya es el índice real en `effectiveTarget`
+                        // (el hash busca sobre el arreglo completo) — no
+                        // hace falta traducirlo desde un espacio de índices
+                        // submuestreado.
+                        let tgt = effectiveTarget.vertices[tgtIdx]
+                        let diff = vecLength(sp - tgt)
                         if diff < options.maxCorrespondenceDistance {
-                            correspondences.append((i, tgtPts[tgtIdx].point, srcPts[i].index, tgtPts[tgtIdx].index))
+                            correspondences.append((i, tgt, srcPts[i].index, tgtIdx))
                         }
                     }
                 }
@@ -153,7 +208,19 @@ public struct ICPAligner: MeshRegistering, Sendable {
                 // transformación ya aplicada. Se guarda como candidato antes
                 // de arriesgar un paso que podría empeorarla.
                 let preUpdateRMSE = sqrt(totalError / Float(usedCount))
-                if preUpdateRMSE < bestRMSE {
+                // El RMSE de candidatos con pocas correspondencias no es
+                // comparable contra uno con muchas: con solo 6-10 puntos
+                // para 6 incógnitas, Gauss-Newton puede sobreajustar
+                // exactamente esos puntos y reportar un RMSE bajo mientras
+                // se aleja de la transformación real (verificado: sin este
+                // piso, un nivel de vóxel fino con apenas 9 correspondencias
+                // llegó a contaminar `bestTransform` con un resultado 9×
+                // peor que el mejor candidato real — fixes.md, "convergencia
+                // de ICP a menos de 1 mm"). 18 = 3× los 6 grados de
+                // libertad, el mínimo habitual para confiar en un ajuste de
+                // mínimos cuadrados.
+                let minCorrespondencesForBest = 18
+                if preUpdateRMSE < bestRMSE, usedCount >= minCorrespondencesForBest {
                     bestRMSE = preUpdateRMSE
                     bestTransform = transform
                 }
