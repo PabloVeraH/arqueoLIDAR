@@ -383,16 +383,16 @@ nonisolated enum SelfTests {
             let shifted = Mesh(vertices: plane.vertices.map { shift.applyAffine($0) }, indices: plane.indices,
                                normals: normals.map { shift.rotation3x3 * $0 })
             _ = try ICPAligner().align(source: shifted, target: plane, initial: .identity,
-                                       options: ICPOptions(degeneracyConditionThreshold: 25))
+                                       options: ICPOptions())
             r.expect("ICP rechaza escena degenerada (un solo plano)", false, "Alineó sin detectar degeneración")
         } catch {
-            if case .degenerate(let cond)? = error as? RegistrationError {
+            if case .degenerate(let cond, _)? = error as? RegistrationError {
                 r.expect("ICP rechaza escena degenerada (un solo plano)", true, "número de condición \(fmt(cond, 1))")
             } else { r.fail("ICP rechaza escena degenerada (un solo plano)", error) }
         }
 
         do {
-            let mesh = Fx.denseCube(size: 0.5, divisions: 3)
+            let mesh = Fx.denseCube(size: 0.5, divisions: 8)
             let truth = Fx.rigid(yawDeg: 12.7, pitchDeg: 5.3, rollDeg: -3.1, translation: SIMD3(0.85, 0.12, -0.34))
             let baseNormals = ops.computeVertexNormals(mesh).map { vecNormalize($0) }
             let source = Mesh(vertices: Fx.addNoise(mesh.vertices, sigma: 0.003), indices: mesh.indices, normals: baseNormals)
@@ -402,8 +402,8 @@ nonisolated enum SelfTests {
             let res = try ICPAligner().align(source: source, target: target, initial: initial,
                                              options: ICPOptions(voxelSizes: [0.1, 0.05], maxIterations: 50))
             let err = vecLength(res.transform.translation - truth.translation)
-            r.expect("ICP recupera transformación conocida", err < 0.25 && !res.isDegenerate,
-                     "error de traslación \(fmt(err * 100, 1)) cm (umbral actual del test: 25 cm; el plan pide < 1 mm — pendiente en fixes.md)")
+            r.expect("ICP recupera transformación conocida", err < 0.005 && !res.isDegenerate,
+                     "error de traslación \(fmt(err * 1000, 1)) mm (umbral: 5 mm, igual que RegistrationTests)")
         } catch { r.fail("ICP recupera transformación conocida", error) }
 
         do {

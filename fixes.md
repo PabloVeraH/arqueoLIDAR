@@ -8,6 +8,42 @@ resumen final.
 Formato de cada hallazgo: **Título**, **Severidad** (`Bloqueante` / `Alta` / `Media` / `Baja`),
 **Descripción**.
 
+> **Estado actual:** todos los hallazgos de este documento (dentro del alcance de los 11
+> módulos SPM en `PaleoRegistro/Sources` y `tools/*.py`) están marcados **✅ Corregido** —
+> cada uno con su nota de resolución bajo la severidad original, sin borrar la descripción
+> del problema encontrado. `swift build` y `swift test` corren en verde (162/162).
+>
+> **La precisión de convergencia de `ICPAligner` frente al objetivo de <1 mm del plan ya no
+> está pendiente en el sentido en que lo estuvo hasta hoy.** Dos sesiones reportaron una
+> mejora de ~0.20 m a ~0.06 m como el mejor resultado alcanzable (ver el hallazgo de
+> `ICPAligner` en `Registration/`) — **ese "0.06 m" resultó ser un artefacto, no una medición
+> real de convergencia**: el optimizador tenía el signo de su ecuación normal invertido, así
+> que cada paso empeoraba el ajuste en vez de mejorarlo, y el guardián `bestTransform` (que
+> descarta cualquier paso peor que el mejor visto) terminaba devolviendo la transformación
+> INICIAL del test sin ningún cambio — `result.transform` era bit a bit idéntico a
+> `initialGuess`. Corregido junto con un segundo bug relacionado (la rotación incremental
+> pivotaba en el origen del mundo en vez del centroide de las correspondencias activas). Con
+> ambos fixes: **error de traslación medido ≈1.9 mm** sobre el mismo test sintético (antes:
+> ≈62 mm, que no era más que el punto de partida sin corregir) — dentro de un factor ~2 del
+> objetivo de <1 mm del plan, y del mismo orden que el ruido de entrada inyectado en el test
+> (3 mm). Ver el hallazgo "signo invertido en la ecuación normal de Gauss-Newton", más abajo,
+> para la derivación matemática completa y la metodología que lo expuso.
+>
+> Sesión de seguimiento (17 ago 2026), en orden: (a) se confirmó que la Fase 3
+> (`App/Capture`, la capa que produciría una nube densa propia y mediría el ruido real del
+> sensor) sigue sin implementar — son directorios vacíos — así que la validación contra
+> hardware real sigue pendiente; el propio plan ya documenta el límite físico conocido (ruido
+> de profundidad ARKit ~1-2 cm a 1-2 m, §2.F riesgo 1); (b) se implementó correspondencia
+> punto→triángulo (antes: punto→vértice más cercano) en `ICPAligner`, medida como una
+> reducción del 76% en el error de cuantización de correspondencia sobre superficie curva; (c)
+> se encontró y corrigió el signo invertido de arriba, el hallazgo de mayor impacto de esta
+> sesión. `ICPAligner.computeConditionNumber` (antes también pendiente) ya usa el Hessiano
+> punto-a-plano real con normalización de escala y descomposición espectral en Double. La capa
+> `App/` (Fases 0, 3, 13, 14, 15 — Xcode, ARKit, UI) sigue completamente fuera de alcance: no
+> existe proyecto Xcode y no puede crearse ni probarse en este entorno Linux. El resumen
+> ejecutivo de abajo describe el estado **al momento de la auditoría original**, antes de los
+> fixes; se conserva sin editar como registro histórico de lo encontrado.
+
 ## Resumen ejecutivo
 
 Revisión completa: estructura del proyecto, los 11 módulos de `PaleoRegistro/Sources`, la
@@ -68,6 +104,14 @@ compila y en su mayoría corre.
 
 ### Guarda de arquitectura (`check_module_boundaries.sh`) nunca se ejecuta
 
+**✅ Corregido.** Se agregó `Scripts/test_module_boundaries.sh`, que ejercita la guarda tal
+como exige el criterio de aceptación de F1: corre la guarda sobre el repo sin modificar
+(debe pasar), inyecta un `import SceneKit` temporal en `Domain/` (debe fallar), lo quita
+(debe volver a pasar) — con limpieza garantizada incluso si algo falla a mitad de camino.
+Se agregó `.github/workflows/ci.yml`, que corre en cada push/PR: la guarda, su auto-test,
+`swift build` y `swift test`, sobre la imagen oficial `swift:6.0`. Antes de esto no existía
+ningún CI ni ninguna prueba de que la guarda realmente detectara una violación.
+
 **Severidad:** Alta
 
 El plan (Fase 1, criterio de aceptación) exige: *"La guarda de arquitectura falla
@@ -89,6 +133,19 @@ CI. El criterio de aceptación de la Fase 1 no está cumplido.
 
 ### `IntegrationTests` es un stub vacío pese a que F1–F12 se dan por "completas"
 
+**✅ Corregido.** Se agregaron 3 tests de integración reales que ejercitan el pipeline
+completo sin UI/ARKit: (1) ciclo de vida de un hallazgo — crear expediente, guardar la
+malla, recargarla desde disco, sellar, verificar en verde, manipular un archivo y verificar
+que la manipulación se detecta, exportar PLY con sidecar; (2) segmentación → OBB → volumen;
+(3) dos campañas → `DiffEngine` → volumen ganado. El primero ejercita directamente el
+camino que tenía el bug bloqueante de Custody — confirma que el ciclo real (no solo el
+aislado de `CustodyTests`) funciona de punta a punta. Se encontraron y corrigieron dos
+problemas menores propios de los datos sintéticos al escribir estas pruebas (no bugs de
+producción): un cubo perfecto no tiene ejes principales únicos para el ajuste de OBB por
+PCA (se reemplazó por una caja con dimensiones distintas por eje), y las caras de una caja
+se separan en componentes distintas con el `maxDihedralAngleDegrees` por defecto (45°,
+correcto para superficies reales) — se subió para esta prueba sintética de una sola pieza.
+
 **Severidad:** Alta
 
 El último commit (`e9c9a7b chore: IntegrationTests stub`) agrega
@@ -105,6 +162,12 @@ contiene ni un solo `@Test`.
 
 ### La suite de tests SÍ corre (con toolchain Linux) y revela ~24 tests reales rotos, 490 fallos
 
+**✅ Resuelto.** Los 24 tests documentados en esta auditoría (más los descubiertos durante
+las correcciones, como el bug de matriz transpuesta) están corregidos. Estado actual:
+**145/145 tests pasan**, `swift build` y `swift test` en verde, y ahora corren
+automáticamente en CI (ver hallazgo de la guarda de arquitectura) — ya no depende de que
+alguien lo ejecute manualmente para descubrir una regresión.
+
 **Severidad:** Bloqueante (metodológico)
 
 El repo no incluye proyecto Xcode, así que la única forma de ejecutar `swift test` es con el
@@ -119,6 +182,11 @@ de cada módulo más abajo; este ítem registra el hecho agregado: **la afirmaci
 "F7–F12 están completas y probadas" no es cierta tal como está el repo ahora.**
 
 ### Placeholders `Stub.swift` de la Fase 1 no se limpiaron al completar cada módulo
+
+**✅ Corregido.** Se eliminaron los 6 `Sources/*/Stub.swift` y sus 6 `Tests/*/StubTests.swift`
+correspondientes (`Custody`, `Export`, `Geo`, `Persistence`, `Registration`, `Segmentation`).
+Ningún otro archivo referenciaba los tipos `*ModuleStub` (verificado por búsqueda en todo
+`Sources/`/`Tests/` antes de borrar). `swift build` y `swift test` (148/148) siguen en verde.
 
 **Severidad:** Baja
 
@@ -362,6 +430,32 @@ porque estos tests fallan de todos modos por causas ajenas al solver).
 
 ### `tools/check_utm.py` nunca llama al conversor de la app — su "round-trip" compara `pyproj` contra sí mismo
 
+**✅ Corregido.** Se implementó el modo `--file` que el docstring ya prometía, en ambos lados:
+
+- **Lado Swift** — nuevo target ejecutable `UTMReferenceDump` (`Sources/UTMReferenceDump/main.swift`,
+  agregado a `Package.swift`) que llama al `UTMConverter` real de la app sobre 24 puntos que
+  cubren Chile continental e insular (husos 12/18/19, bordes de huso) e imprime CSV
+  (`lat,lon,easting,northing,zone,hemisphere,epsg`) por stdout. Puntos fuera de los husos que
+  la app soporta reportan el error tipado por stderr en vez de interrumpir el resto del volcado.
+- **Lado Python** — `check_utm.py` ahora usa `argparse` con `--file <path>` y
+  `--tolerance-mm` (default 1 mm, igual que `GeoTests`). Con `--file`, lee el CSV y para cada
+  punto recalcula zona/hemisferio/EPSG/E/N con `pyproj` de forma independiente, compara contra
+  lo que reportó la app, y falla si hay discrepancia de huso o si el error de posición supera
+  la tolerancia.
+- De paso se corrigió `CONTROL_POINTS`, la tabla de puntos de control *local* de este script
+  (independiente de la de `GeoTests`, ya corregida antes): tenía valores redondeados a mano
+  que además clasificaban mal el huso de 3 de sus 8 puntos, por lo que el propio script
+  reportaba `[DISCREPANCIA]` de hasta 2295 m en los 8 puntos — no por un bug del
+  `UTMConverter`, sino porque la tabla de referencia del script estaba mal. Se reemplazó por
+  los mismos puntos que `GeoTests.zone18Points/zone19Points/zone12Points`, con E/N de
+  `pyproj` a precisión completa y tolerancia de 1 mm.
+
+Verificado extremo a extremo: `swift run UTMReferenceDump > tools/utm_reference.txt` seguido
+de `python3 tools/check_utm.py --file tools/utm_reference.txt` corre en verde, con un error
+máximo app-vs-pyproj de 0.621 mm sobre 20 puntos (los 4 restantes caen en huso 20, no
+soportado por el `UTMConverter`, y se excluyen limpiamente). `tools/utm_reference.txt` es un
+artefacto generado y determinista — no se versiona (agregado a `.gitignore`).
+
 **Severidad:** Alta
 
 El criterio de aceptación de F8 pide expresamente: *"Cruce contra una implementación
@@ -511,6 +605,36 @@ formato) para lo que realmente es una excepción de tipo no manejada.
 
 ### Bug adicional (independiente) en `tools/verify_chain.py`: usa el epoch equivocado al reconstruir el payload firmado
 
+**✅ Corregido.** Ahora que `CanonicalJSONEncoder` serializa `Date` como ISO 8601 con
+milisegundos (ver el fix del hallazgo de arriba, "`ChainVerifier` no logra parsear ningún
+sello real"), `wallClock` en `chain.jsonl` ya no es un `Double` crudo — es un string
+(`"2026-08-16T13:47:21.404Z"`). Se agregó `iso8601_millis()` en `verify_chain.py`, que
+parsea ese string con `datetime.strptime(...).replace(tzinfo=timezone.utc)` y lo convierte a
+milisegundos desde el epoch Unix redondeados — el mismo entero que firma
+`SealSigner.swift` (`CanonicalDateCoding.millisecondsSince1970`), no el string ISO 8601 ni
+ningún epoch de punto flotante. El payload reconstruido pasó de
+`f"{rootHash}|{wallClock}|{author}"` (con `wallClock` como string ISO 8601 completo, que
+nunca coincidía con lo firmado) a usar los milisegundos recalculados.
+
+Verificando el fix de punta a punta con un bundle sellado real se encontró un **segundo bug,
+independiente, en la misma función**: `verify_signature()` parseaba `publicKeyDER` con
+`ec.EllipticCurvePublicKey.from_encoded_point(...)`, que espera un punto EC crudo sin
+encabezado (`0x04||X||Y`, 65 bytes) — pero `publicKeyDER` es la
+`SubjectPublicKeyInfo` DER completa que produce `P256.Signing.PublicKey.derRepresentation`
+de CryptoKit (~91 bytes). Esto lanzaba `ValueError: Unsupported elliptic curve point type`,
+capturado por el `except Exception: return False` genérico y reportado, engañosamente, como
+"firma inválida" — el mismo patrón de diagnóstico erróneo que el hallazgo anterior ya había
+detectado para el bug de `publicKeyDER` como lista de bytes. Se reemplazó por
+`load_der_public_key(pub_der)`, el parser correcto para SPKI DER.
+
+Verificado extremo a extremo: se generó un bundle sellado real (fuera de la suite de tests) y
+`verify_chain.py` reportó `VERIFICACIÓN: OK` sobre el bundle íntegro, y `FALLO` con el error
+correcto en tres escenarios de manipulación probados por separado (byte alterado en
+`mesh.ply`, manifiesto sustituido sin tocar archivos reales, y campo firmado alterado). Antes
+de este fix, `verify_chain.py` rechazaba **todo** bundle, íntegro o no, con el mismo mensaje
+de "firma inválida" — el bug documentado más abajo (`rootHash` nunca verificado) es el que
+demuestra el hueco adicional que quedaba una vez corregida la firma.
+
 **Severidad:** Alta — quedaría oculto hasta que se corrija el bug de arriba, y entonces
 rompería la verificación de firma igual
 
@@ -539,6 +663,21 @@ script Python está rota de forma independiente al bug de formato `Data` — arr
 arregla el otro.
 
 ### `tools/verify_chain.py` nunca verifica el `rootHash` del manifiesto — omite una categoría entera de manipulación que sí cubre la versión Swift
+
+**✅ Corregido.** `verify()` ahora llama a `compute_root_hash()` (que ya existía pero nunca se
+invocaba) para cada sello de la cadena, recalculando el SHA-256 del manifiesto que ese mismo
+sello declara y comparándolo contra `seal["rootHash"]`. Esto cierra el hueco donde un
+manifiesto sustituido (entradas con `bytes`/`sha256` distintos a los reales, o archivos
+agregados/quitados de la lista) podía pasar desapercibido mientras `rootHash` no cambiara —
+la firma solo cubre `rootHash`, no el manifiesto completo, así que sin este paso la firma
+seguía verificando sobre un `rootHash` que ya no correspondía a lo declarado.
+
+Probado con un caso concreto: se alteró el campo `bytes` de una entrada del manifiesto en un
+`chain.jsonl` real, sin tocar ni el archivo en disco ni `rootHash`. Antes de este fix, ningún
+paso de `verify()` lo detectaba (el archivo real seguía coincidiendo con su propia entrada
+del manifiesto declarado, y la firma seguía siendo válida sobre el `rootHash` sin cambiar).
+Con el fix, `verify_chain.py` reporta correctamente `Sello 0: rootHash no coincide con su
+propio manifiesto`.
 
 **Severidad:** Media
 
@@ -664,20 +803,310 @@ la iteración siguiente; y no se guardaba la mejor transformación vista, así q
 iteraciones que empeoran gradualmente podía arruinar un resultado que ya había convergido
 bien.
 
-**Lo que queda documentado como pendiente, no oculto:** `computeConditionNumber` sigue
-usando un heurístico de dispersión geométrica genérico (no el Hessiano punto-a-plano real)
-porque la versión con el Hessiano real, aunque detecta correctamente una pared plana como
-degenerada, sobre-marcaba como degenerada una escena con normales en varias direcciones (un
-cubo) bajo ciertas transformaciones — no se pudo aislar la causa exacta con confianza en el
-tiempo disponible. Los umbrales de `degeneracyConditionThreshold` en los tests que ejercitan
-este heurístico están calibrados contra su salida actual (por escena), no derivados
-físicamente. La precisión de convergencia de ICP en el test de "recupera transformación
-conocida" quedó verificada en ~0.20 m, no en el <1 mm que pide el plan — mejora sustancial
-sobre el bug original (0.92 m de error, o directamente sin converger), pero el residuo
-apunta a un problema de conditioning adicional (correspondencia por vecino más cercano entre
-caras de un cubo pequeño) que queda para una fase posterior de trabajo sobre F11.
+**✅ `computeConditionNumber` corregido — ahora usa el Hessiano punto-a-plano real.** El
+primer intento (documentado arriba como pendiente) sobre-marcaba escenas bien condicionadas
+(un cubo) como degeneradas. Causa raíz identificada (no solo "hacía falta más tiempo"):
+comparaba autovalores de `H = ΣJᵀJ` — que crecen como el cuadrado del número de condición de
+`J` — contra un umbral calibrado para el heurístico anterior, sin no-dimensionalizar la
+escala de los puntos (Gelfand, Ikemoto, Rusinkiewicz & Levoy, *"Geometrically Stable Sampling
+for the ICP Algorithm"*, 3DIM 2003, identifican exactamente esta combinación como necesaria).
+
+Fix: `H` se centra en el centroide de la muestra y se no-dimensionaliza por su escala RMS
+(bloque rotacional `p̂×n` y traslacional `n` quedan en la misma magnitud), se diagonaliza en
+`Double` (no `Float` — la sospecha de pérdida de precisión del intento anterior era
+razonable) vía un solver de Jacobi cíclico propio y puro Swift
+(`Registration/SymmetricEigenJacobi.swift`, sin Accelerate/LAPACK: `Registration` es un
+módulo puro protegido por `check_module_boundaries.sh`, y una implementación distinta por
+plataforma sería inaceptable en un proyecto donde este veredicto puede terminar en un informe
+pericial). El número de condición es ahora `σ_max/σ_min` (σ = raíz del autovalor, no el
+autovalor directo — evita reportar el cuadrado inflado). Verificado empíricamente: un plano
+mide `cond ≈ 1e7` (autovalores exactamente 0 en las 3 direcciones sin restringir) y un cubo
+bien condicionado mide `cond ≈ 2.5` — seis órdenes de magnitud de separación, sin necesidad
+de calibrar el umbral por escena (los `degeneracyConditionThreshold: 25.0` de los tests
+afectados se removieron; usan el valor por defecto, 1e6).
+
+Además, `AlignmentResult`/`RegistrationError.degenerate` ahora exponen `weakDirections:
+[WeakDirection]` — la dirección de 6-DOF de cada autovector débil (eje dominante + σ),
+derivada de los mismos autovectores que ya se calculaban para el número de condición.
+Verificado contra el resultado teórico clásico de degeneración de ICP sobre un plano (normal
+Y): las 3 direcciones sin restringir detectadas son exactamente `{translationX,
+translationZ, rotationY}`, con σ≈0 — lo que antes era un escalar sin explicación ahora puede
+decir, en un informe pericial, *qué* dirección del calce no quedó restringida. Cobertura
+nueva: `SymmetricEigenJacobiTests` (5 tests: reconstrucción `A·v=λv`, ortonormalidad de
+autovectores, conservación de traza, caso diagonal y bloque 2×2 con solución conocida a
+mano) y la aserción reforzada de `planarDegeneracyRejected`.
+
+**✅ Precisión de convergencia: 0.20 m → ~0.06 m (4 bugs reales encontrados y corregidos en la
+cadena correspondencia→convergencia), sigue sin llegar al <1 mm del plan.** Diagnóstico
+inicial (propuesto para revisión, no aplicado a ciegas): "malla de test dispersa +
+correspondencia cuantizada por el vóxel + pocas correspondencias". Verificado
+empíricamente antes de tocar código (metodología: medir, no asumir — la misma que ya había
+evitado un fix especulativo fallido en `computeConditionNumber`, ver hallazgo de arriba) y se
+encontró que el mecanismo real era distinto del propuesto, con una cadena de 4 bugs
+independientes, cada uno enmascarando al siguiente hasta corregir el anterior:
+
+1. **`voxelSubsample` del target adelgazaba el conjunto de candidatos de correspondencia**
+   (`ICPAligner.swift`, antes de este fix): el hash de correspondencias buscaba solo entre los
+   representantes "primer punto que cae en la celda" del target submuestreado, no en la nube
+   completa — perdía candidatos, notoriamente cerca de los límites entre caras del cubo
+   sintético (cuyas caras, al generarse independientemente en `denseCubeMesh`, no comparten
+   vértices). Corregido: el hash busca ahora sobre `effectiveTarget.vertices` completo;
+   `source` sigue submuestreado (ahí no vivía el problema). Efecto medido en aislamiento:
+   ~2% de mejora — mucho menor de lo esperado, porque punto-a-plano ya es tolerante a qué
+   punto exacto de una cara plana se usa como correspondencia (el residuo `(Rp+t−q)·n` no
+   cambia si `q` está en el mismo plano tangente).
+2. **El radio de búsqueda del hash espacial dependía de `voxelSize`, no de
+   `maxCorrespondenceDistance`**: `cellSize = voxelSize·2` con vecindario 3×3×3 da un radio de
+   captura real de ~`voxelSize·3`, que se achica en cada nivel más fino de la estrategia
+   gruesa-a-fino, independientemente de lo que `options.maxCorrespondenceDistance` promete.
+   Medido directamente: en el nivel más fino (`voxelSize=0.02`), con el registro aún a ~14 cm
+   de error tras los niveles gruesos, el radio de captura efectivo (~6-8 cm) ya no alcanzaba a
+   encontrar casi ninguna correspondencia (13 de ~480 puntos posibles) — el nivel fino moría
+   en su primer paso, no porque `maxCorrespondenceDistance` lo prohibiera sino porque el hash
+   nunca llegaba a buscar tan lejos. Corregido: `cellSize = max(voxelSize·2,
+   options.maxCorrespondenceDistance)`, garantizando el radio de captura que `ICPOptions` ya
+   prometía, en cualquier nivel.
+3. **`prevRMSE` (el criterio de corte "empeoró más de 10% respecto a la iteración anterior")
+   no se reiniciaba entre niveles de vóxel** — se declaraba una sola vez fuera del loop de
+   niveles. La primera iteración de un nivel más fino (con un conjunto de correspondencias
+   completamente distinto, en otra escala de residuo) se comparaba contra el último RMSE del
+   nivel anterior; si resultaba apenas peor, el criterio de corte mataba el nivel fino en su
+   primer paso, con `bestTransform` sin actualizarse. Este era el motivo real de que agregar
+   un nivel de vóxel más fino no aportara nada, incluso con malla densa que sí lo soportaba.
+   Corregido: `prevRMSE` se reinicia a `.infinity` al empezar cada nivel.
+4. **Consecuencia de corregir 2 y 3, no un bug independiente pero sí uno nuevo expuesto por
+   ellos**: al dejar de morir prematuramente, un nivel fino con muy pocas correspondencias
+   (medido: 9, para un sistema de 6 incógnitas) podía sobreajustar exactamente esos puntos,
+   reportar un RMSE bajo por pura casualidad estadística, y contaminar `bestTransform` con un
+   resultado peor que el mejor candidato real visto hasta entonces — medido en un caso
+   concreto: el error final empeoró de 0.062 m a 0.57 m al aplicar solo los fixes 2 y 3, antes
+   de aplicar este cuarto fix. Corregido: `bestTransform` solo se actualiza con candidatos que
+   tengan al menos `minCorrespondencesForBest = 18` (3× los 6 grados de libertad) — un
+   candidato con menos correspondencias que eso no es comparable de forma confiable contra uno
+   con muchas más.
+
+**Metodología, no solo el resultado:** cada uno de estos 4 bugs se encontró porque el
+anterior, al corregirse, dejó de enmascararlo — el mismo patrón que ya había ocurrido con el
+bug de traspuesta en `Matrix3x3`/`Matrix4x4` más arriba en este documento. El tercer fix, en
+particular, **empeoró el resultado medido** (0.062 m → 0.57 m) antes de que el cuarto lo
+corrigiera — se reporta explícitamente porque es evidencia de que el proceso fue medir en
+cada paso, no asumir que una corrección bien razonada necesariamente mejora las cosas.
+
+**Resultado final medido**, con `denseCubeMesh(size: 0.5, divisions: 8)` (antes: `divisions:
+3`, espaciado real ~0.167 m — verificado como el límite duro de la malla original, tal como
+se había propuesto en el diagnóstico inicial): **error de traslación ~0.06 m**, una mejora de
+~3× sobre los ~0.20 m anteriores. `RegistrationTests.recoversKnownTransform` se actualizó a
+esa densidad de malla y su tolerancia se ajustó de <0.25 m a <0.1 m (margen sobre lo medido,
+no la tolerancia floja que tenía antes). Un nivel de vóxel más fino que 0.05 (ej. 0.02) sigue
+sin aportar con esta densidad — nunca junta las 18 correspondencias mínimas — haría falta una
+nube considerablemente más densa que la de este test sintético.
+
+**Lo que sigue pendiente, documentado, no oculto:** el <1 mm del plan no se alcanzó. La
+evidencia actual apunta a la densidad de la nube (real, no solo la sintética de este test)
+como el factor dominante, no a un bug puntual adicional — coherente con que LiDAR real en
+iOS ya entrega nubes bastante más densas que este cubo sintético. Papers relevantes para
+seguir esta línea, no aplicados en este ciclo: Rusinkiewicz & Levoy (2001), *"Efficient
+Variants of the ICP Algorithm"* (3DIM) — normal-space sampling, para no perder caras chicas
+frente a las grandes al submuestrear; Segal, Haehnel & Thrun (2009), *"Generalized-ICP"*
+(RSS) — plano-a-plano con covarianzas por punto, el salto de cm a mm que exigiría más que
+ajustes de parámetros.
+
+---
+
+**Sesión de seguimiento (17 ago 2026) — dos pasos, en el orden acordado antes de tocar
+código: (1) medir el piso de ruido real antes de invertir en el algoritmo, (2) mejorar la
+correspondencia de ICP de punto→vértice a punto→triángulo.**
+
+**Paso 1 — el piso de ruido real no puede medirse todavía; el plan ya documenta el límite
+físico conocido, y hay una tensión interna sin resolver.** Verificado antes de tocar código
+(metodología del resto de este documento: medir, no asumir): la Fase 3 del plan
+(`App/Capture` — `ARSessionManager`, `MeshAnchorReader`, `DepthAccumulator`,
+`CoverageTracker`) es la que produciría, según §3 Fase 3, "una nube densa propia desde
+`sceneDepth` filtrada por `confidenceMap`... con al menos un orden de magnitud más puntos que
+`ARMeshAnchor`", y la que ejecutaría la "Prueba de ruido del sensor, medida no asumida"
+(apuntar a una pared real y reportar σ de los residuos). Ninguna de las dos existe: `App/`
+tiene únicamente carpetas vacías (`Capture/`, `Rendering/`, `UI/`, `ExportApp/`,
+`PersistenceProviders/`, `CustodyProviders/`, `GeoProviders/`, `App/`) — 0 archivos `.swift`
+en ninguna. No hay proyecto Xcode, no hay target de app, y (correctamente) no puede crearse ni
+probarse en este entorno Linux. Consecuencia directa: **no hay ninguna medición propia posible
+del ruido real del sensor**, ni de la densidad real de la nube capturada, hasta que esa fase
+se implemente y se ejecute en un iPhone físico.
+
+Lo que sí existe es la cifra que el propio plan ya documenta como conocimiento previo, no
+medido: §2.F riesgo 1 declara *"la malla de `ARMeshAnchor` tiene triángulos de ~5-10 cm y está
+suavizada; el ruido de profundidad es de 1-2 cm a 1-2 m y crece rápido más allá"*. Esa cifra,
+tomada tal cual, ya es suficiente para poner en tensión el criterio de aceptación de esta
+misma Fase 11: el test `recoversKnownTransform` (arriba) inyecta solo 3 mm de ruido sintético
+y el plan (§3 Fase 11) exige recuperar la transformación dentro de 1 mm — un objetivo que,
+con el ruido de profundidad real que el propio plan reconoce (1-2 cm, un orden de magnitud
+mayor que los 3 mm del test), sería matemáticamente inalcanzable incluso con un ICP perfecto:
+el RMSE de un registro no puede bajar de `√(σ²_src + σ²_tgt)`, que con σ≈15 mm en ambas nubes
+ya da un piso ≈21 mm — veinte veces el objetivo de 1 mm. Esto no es un hallazgo nuevo sobre el
+algoritmo; es una inconsistencia entre dos secciones del propio plan (el riesgo 2.F.1, que
+reconoce el ruido real del sensor, y el criterio de aceptación de Fase 11, que lo ignora) que
+ya existía antes de esta sesión y que ninguna mejora a `ICPAligner` puede resolver por sí
+sola. La mitigación de diseño que el plan propone para esto — la nube densa filtrada y
+promediada de `DepthAccumulator` — es precisamente la pieza no implementada de arriba.
+**Recomendación, no aplicada en este ciclo:** cuando la Fase 3 exista, correr la prueba de
+ruido del propio plan y, con esa cifra real, decidir si el criterio de aceptación de Fase 11
+se mantiene, se relaja explícitamente, o se redefine contra la nube densa de
+`DepthAccumulator` en vez de contra `ARMeshAnchor`.
+
+**Paso 2 — correspondencia punto→triángulo, implementada y medida.** `ICPAligner` buscaba
+correspondencias con `SpatialHash.nearest()`, que devuelve el **vértice** target más cercano
+— la distancia mínima posible de cualquier correspondencia queda acotada por el espaciado
+real entre vértices del target (el espaciado del sensor, no un parámetro del algoritmo).
+Se agregó `closestPointOnTriangle` (`Sources/Registration/ClosestPointOnTriangle.swift`,
+algoritmo de Ericson, *"Real-Time Collision Detection"*, 2005, §5.1.5 — clasificación de
+regiones de Voronoi del triángulo, 8 tests unitarios en
+`Tests/RegistrationTests/ClosestPointOnTriangleTests.swift`) y una nueva `TriangleHash` en
+`ICPAligner.swift` que la usa para proyectar cada punto fuente sobre el triángulo target más
+cercano (no solo su vértice más cercano), interpolando también la normal en ese punto exacto
+por coordenadas baricéntricas cuando el target trae normales reales. Con target sin
+triangulación (nube de puntos pura, `indices` vacío), cada vértice se indexa como un triángulo
+degenerado (a==b==c) y el comportamiento se reduce exactamente al de antes — sin regresión
+para ese caso.
+
+**Medido, no asumido — y con un resultado que corrige una expectativa inicial:** sobre el
+cubo sintético de `recoversKnownTransform` el cambio **no tuvo efecto medible** (0.0616 m de
+error de traslación, idéntico antes y después, con y sin el nivel de vóxel más fino de 0.02).
+La razón, verificada aparte: las 6 caras de `denseCubeMesh` son perfectamente planas, y el
+residuo punto-a-plano `(Rp+t−q)·n` ya es invariante a qué punto exacto de una misma cara
+plana se usa como `q` — exactamente el mismo argumento que explica por qué el fix #1 del
+hallazgo de arriba ("hash sobre el target completo") midió solo ~2% de efecto aislado. Un
+experimento de control aparte, sobre una malla esférica de 8×8 divisiones (curvatura real,
+no representada en ningún test sintético de este proyecto): comparando, para 300 puntos
+aleatorios sobre la esfera unitaria exacta, la distancia RMS al vértice más cercano contra la
+distancia RMS al punto proyectado sobre el triángulo más cercano, el error de cuantización
+bajó de 0.218 a 0.053 (**reducción del 76%**) — ver el test permanente
+`curvedSurfaceQuantizationReduction` en `ClosestPointOnTriangleTests.swift`, que fija un
+umbral de 50% de reducción como piso de regresión. La conclusión honesta: el cambio es
+matemáticamente correcto, de bajo riesgo (sin ninguna regresión en los 162 tests del
+proyecto), y de alto impacto esperado en superficies curvas irregulares — el caso real de
+huesos, rocas y estratos que este proyecto escanea — pero **la suite de tests sintéticos
+actual no puede exhibir ese beneficio**, porque su única malla usada en criterios de
+aceptación de ICP (`denseCubeMesh`) es plana por construcción. Queda pendiente, para medir el
+efecto real sobre el objetivo de convergencia, agregar un escenario de aceptación con
+curvatura (o esperar datos reales de la Fase 3).
+
+**Archivos:** `Sources/Registration/ClosestPointOnTriangle.swift` (nuevo),
+`Sources/Registration/ICPAligner.swift` (`SpatialHash` reemplazada por `TriangleHash` en la
+búsqueda de correspondencias; sin cambios en `computeRMSE`, que sigue midiendo contra
+vértices — fuera de alcance de este ciclo),
+`Tests/RegistrationTests/ClosestPointOnTriangleTests.swift` (nuevo, 9 tests). Suite completa:
+162/162 tests pasan.
 
 **Severidad:** Alta
+
+---
+
+**✅ Signo invertido en la ecuación normal de Gauss-Newton — el "0.06 m" de convergencia de
+ICP nunca fue tal: era el error del punto de partida del propio test, nunca corregido.**
+Descubierto mientras se armaba, a pedido del usuario, una comparación A/B del efecto real del
+Paso 2 (arriba) sobre la convergencia — no un hallazgo buscado deliberadamente, sino
+tropezado al instrumentar el ICP para medir con honestidad, siguiendo la misma metodología de
+"medir, no asumir" del resto de este documento.
+
+**Lo que se encontró:** instrumentando `align()` iteración por iteración sobre el propio test
+`recoversKnownTransform`, `result.transform` resultó ser **bit a bit idéntico** a
+`initialGuess` — ni la traslación ni la rotación cambiaban en absoluto. El rastro interno
+mostraba que el Gauss-Newton sí ejecutaba pasos reales, pero el RMSE **empeoraba en cada
+iteración desde la primera** (0.028 → 0.037 → 0.037 → 0.043 en las primeras 4 iteraciones
+medidas). El guardián `bestTransform` — agregado en la sesión anterior específicamente para
+"no dejar que un paso malo empeore el resultado" — hacía exactamente eso: como ningún paso
+posterior lograba un RMSE mejor que el de la transformación inicial (evaluada antes de
+aplicar cualquier paso), se quedaba con esa transformación inicial intacta. El test "pasaba"
+porque su punto de partida está a solo 6 cm de la verdad — un artefacto de cómo se construyó
+el test, no evidencia de convergencia. **Verificado que no es un bug introducido en este
+ciclo:** el mismo diagnóstico corrido contra el commit `416c387` (el de la sesión anterior,
+en un `git worktree` aislado) reprodujo el mismo resultado exacto — `identicalToInitial =
+true` ya estaba presente antes de cualquier cambio de esta sesión. La "mejora de 0.20 m a
+0.06 m" documentada en el hallazgo de "convergencia de ICP a menos de 1 mm" (arriba) fue una
+mejora real en la *búsqueda de correspondencias* (los 4 bugs ahí documentados), pero el
+"0.06 m" final nunca reflejó una convergencia real del optimizador — era, con alta
+probabilidad, casi enteramente el error residual del punto de inicialización del test.
+
+**Primer intento, insuficiente por sí solo:** la hipótesis inicial fue "brazo de palanca" —
+la actualización se compone como `transform = deltaTransform · transform` (multiplicación por
+la izquierda, en el frame global), así que `transform_new.translation = ΔR·transform.translation
++ Δt`: la rotación incremental gira la traslación YA ACUMULADA (aquí, ~0.9 m desde el origen)
+alrededor del origen del mundo, no del objeto. Con `maxStepR = 0.2 rad`, un giro incremental
+en el peor caso produce un desplazamiento espurio de hasta `0.9 × sin(0.2) ≈ 0.18 m` —
+mayor que `maxCorrespondenceDistance` (0.10 m), explicando el colapso de correspondencias
+observado entre iteraciones consecutivas (140 → 30 en un solo paso). Se corrigió pivotando la
+rotación incremental en el centroide de las correspondencias activas de cada iteración, no en
+el origen: `cross = (Rpᵢ + t − centroid) × n` en vez de `(Rpᵢ + t) × n`, y
+`Δt_efectivo = α + centroid − ΔR·centroid` en la reconstrucción de `deltaTransform` (derivación
+verificada dos veces: manualmente y por un agente independiente sin acceso al resto de este
+análisis, ambas derivaciones coinciden). Este fix por sí solo **no bastó** — medido: con el
+centrado aplicado pero sin lo que sigue, el RMSE seguía empeorando en cada iteración
+(0.028 → 0.053 → 0.051 → 0.059), solo que con una dirección de "salida" distinta. Se mantiene
+igual: es una corrección matemáticamente real y necesaria para robustez (sin ella, cualquier
+escena con traslación acumulada grande sigue expuesta al mismo efecto), aunque no era la causa
+dominante de la divergencia observada aquí.
+
+**Causa raíz real: signo invertido.** La ecuación normal de Gauss-Newton para minimizar
+Σ(eᵢ + Jᵢ·δ)² respecto a δ es `(ΣJᵢJᵢᵀ)·δ = −ΣJᵢ·eᵢ` — el signo negativo en el lado derecho es
+lo que hace que δ apunte en la dirección que *reduce* el residuo. El código acumulaba
+`JtE[r] += J[r]·residual` (es decir, `JtE = ΣJᵢ·eᵢ`, sin negar) y resolvía
+`solve6x6(JtJ, rhs: JtE)` — `JtJ·sol = JtE`, **sin el signo negativo** — usando `sol` (`alpha`,
+`omega`) directamente como el paso a aplicar. Con `H = JtJ` semidefinida positiva (usa
+`bestTransform`/`solve6x6` ya exige pivote no nulo, así que en la práctica definida positiva),
+`sol = H⁻¹·JtE` y el paso correcto es `−H⁻¹·JtE = −sol`: el código aplicaba sistemáticamente
+el **paso opuesto** al que minimiza el error, en cada iteración, desde siempre. La derivada
+direccional del error total a lo largo del paso aplicado es `2·JtE·sol = 2·JtEᵀH⁻¹JtE ≥ 0`
+(positiva salvo en el mínimo exacto) — matemáticamente garantizado que el paso aplicado
+*aumenta* el error a primer orden, sin importar el damping o el pivote de rotación. Esto
+explica por completo por qué el fix de centrado (arriba) no bastó: no importa dónde pivote la
+rotación si la dirección del paso ya está invertida. Confirmado por partida doble:
+verificación matemática manual (dos derivaciones independientes) y verificación por un agente
+separado sin contexto del resto de esta investigación, ambas coincidiendo en la misma
+conclusión y la misma corrección. Verificado también empíricamente antes de aplicar el fix
+definitivo: negar `sol` como prueba aislada, antes de formalizar el cambio, hizo que el primer
+paso pasara de *empeorar* el RMSE a *mejorarlo* drásticamente (0.028 → 0.0023 en la primera
+iteración, con y sin el fix de centrado aplicado en paralelo).
+
+**Fix aplicado:** `solve6x6(JtJ, rhs: JtE.map { -$0 })` — se niega el lado derecho antes de
+resolver, dejando la acumulación de `JtE` sin tocar (más legible mantener `JtE = ΣJᵢeᵢ` con su
+significado de "gradiente" intacto, y negar solo en el punto donde se resuelve el sistema).
+
+**Resultado medido**, mismo test, mismo punto de partida, ambos fixes de esta sección
+aplicados juntos (centrado + signo): error de traslación final **≈1.9 mm** (antes: idéntico al
+punto de partida, ≈62 mm) — con ruido de entrada inyectado de 3 mm, un resultado del mismo
+orden que el propio piso de ruido del test, y dentro de un factor ~2 del objetivo de <1 mm del
+plan. `RegistrationTests.recoversKnownTransform` actualizado: tolerancia de `<0.1 m` a
+`<0.005 m` (margen real sobre lo medido, no la tolerancia floja que tenía antes), comentario
+reescrito con el historial completo de las dos rondas de fixes. Suite completa: 162/162 tests
+pasan, sin ninguna otra regresión — el resto de los tests de ICP usaban tolerancias laxas o
+manejo de excepción silencioso que nunca ejercitó esta ruta de forma estricta.
+
+**Sobre `bestTransform` y el diseño a futuro:** el guardián que enmascaró este bug durante dos
+sesiones sigue siendo una buena práctica de defensa en profundidad (protege contra
+correspondencias ruidosas, escenas casi degeneradas, mala inicialización) y se mantiene sin
+cambios — pero pasa de ser, en la práctica, *el resultado real* (porque el optimizador nunca
+mejoraba nada) a ser una red de seguridad genuina sobre un optimizador que ahora sí converge.
+Recomendación no aplicada en este ciclo, para una futura ronda: Levenberg-Marquardt con
+backtracking real (probar el paso contra el RMSE no linealizado antes de aceptarlo; si
+empeora, subir el damping y reintentar en la misma iteración en vez de aplicar y recién
+detectar el daño en la iteración siguiente) daría una capa adicional de robustez ahora que la
+dirección del paso es correcta — no era necesario para resolver la divergencia observada aquí
+(el signo por sí solo la explica), pero es la práctica estándar recomendada en la literatura
+(Pomerleau, Colas & Siegwart, 2015) para escenas peor condicionadas que este test sintético.
+
+**Metodología:** este hallazgo es el tercer caso en este documento donde una tolerancia floja
+o un guardián de emergencia ocultó un bug de fondo durante más de una sesión (los otros dos:
+el bug de traspuesta en `Matrix3x3`/`Matrix4x4` y la cadena de 4 bugs de correspondencia). El
+patrón que los expone siempre es el mismo: verificar el resultado NUMÉRICO exacto contra un
+caso trivial (aquí, `result.transform == initialGuess`), no solo si la aserción del test pasa.
+
+**Archivos:** `Sources/Registration/ICPAligner.swift` (centroide de pivote para la rotación
+incremental; signo corregido en la resolución del sistema 6×6),
+`Tests/RegistrationTests/RegistrationTests.swift` (tolerancia de `recoversKnownTransform`
+ajustada de `<0.1 m` a `<0.005 m`, comentario con el historial completo). Suite completa:
+162/162 tests pasan.
+
+**Severidad:** Bloqueante (el resultado central del módulo de registro no era el que se
+reportaba)
 
 **a) *"ICP: recupera transformación conocida con ruido de 3 mm"*** — el criterio del plan
 (§3, F11) pide recuperar una transformación de 0.85 m / 12.7° con ruido de 3 mm, dentro de
@@ -820,6 +1249,19 @@ declarada.
 
 ### `PLYWriter` descarta silenciosamente `mesh.colors` y `mesh.normals` — el PLY de peritaje nunca lleva el mapa de calor que el plan pide
 
+**✅ Corregido.** `Mesh/PLYCodec.encode(_:)` ahora agrega condicionalmente las propiedades
+`nx,ny,nz` (float) y `red,green,blue,alpha` (uchar) por vértice cuando `mesh.normals`/
+`mesh.colors` están presentes y su cuenta coincide exactamente con `mesh.vertices.count`
+(si no coincide, se omiten en vez de leer fuera de rango — la malla nunca debería llegar en
+ese estado, pero el códec no confía ciegamente en el invariante). `decode(_:)` detecta la
+presencia de estas propiedades en la cabecera y reconstruye `mesh.normals`/`mesh.colors` en
+el mismo orden fijo en que `encode(_:)` las escribe (no es un lector PLY genérico que
+reordene por cabecera arbitraria). Como tanto `BundleWriter`/`FindingStore` (formato interno
+del bundle) como `Export/PLYWriter` (export de peritaje) delegan en el mismo códec, este fix
+resuelve el descarte en ambos lugares a la vez. Se agregaron tests de round-trip con
+normales+colores, con solo colores, y del caso de cuenta desalineada (`PLYCodecTests` en
+`MeshTests.swift`). Suite completa: 148/148 tests pasando.
+
 **Severidad:** Alta
 
 `Sources/Export/PLYWriter.swift:26-45` escribe la cabecera PLY con solo tres propiedades por
@@ -939,6 +1381,15 @@ el `README.md` (ver más abajo) da a entender que solo falta "crear el contenedo
 ---
 
 ## `README.md` — afirma que "el código de la lógica ya está hecho", lo cual es impreciso
+
+**✅ Corregido.** Se suavizó la frase de la Parte 2 ("ya está escrito, pero no todo funciona
+correctamente todavía... revisa `fixes.md`") y se agregó una nota de advertencia antes del
+paso de `verify_chain.py` en la Parte 9.3. Esa segunda nota ya se retiró (ver el hallazgo de
+`verify_chain.py` más arriba: el bug que advertía ya está corregido, así que la advertencia
+quedaría obsoleta y confundiría más de lo que ayudaría). Con todos los hallazgos de este
+documento corregidos, la afirmación original ya no es materialmente engañosa — sigue siendo
+cierto, y sigue documentado explícitamente en el README, que la capa `App/` (Xcode, ARKit,
+UI) no existe todavía.
 
 **Severidad:** Media
 

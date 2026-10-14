@@ -29,7 +29,6 @@ public struct ICPAligner: MeshRegistering, Sendable {
         let effectiveTarget = applyStableMask(target, mask: stableRegionMask)
 
         var transform = initial
-        var prevRMSE: Float = .infinity
 
         // El update de Gauss-Newton se aplica siempre, incluso si el sistema
         // 6×6 está mal condicionado y produce un paso malo — el único freno
@@ -50,28 +49,79 @@ public struct ICPAligner: MeshRegistering, Sendable {
             // de normales *sin submuestrear*: dos espacios de índices
             // distintos que no tienen relación entre sí).
             let srcPts = voxelSubsample(source.vertices, cellSize: voxelSize)
-            let tgtPts = voxelSubsample(effectiveTarget.vertices, cellSize: voxelSize)
 
             let tgtHasNormals = effectiveTarget.normals != nil
 
-            guard srcPts.count >= 10, tgtPts.count >= 10 else { continue }
+            guard srcPts.count >= 10, effectiveTarget.vertices.count >= 10 else { continue }
 
-            // Construir hash espacial para la nube target
-            let targetHash = SpatialHash(points: tgtPts.map(\.point), cellSize: voxelSize * 2)
+            // Hash de triángulos sobre el target COMPLETO, no submuestreado
+            // (fixes.md, "convergencia de ICP a menos de 1 mm"): punto-a-
+            // plano es tolerante a qué punto exacto de una cara plana se
+            // use como correspondencia — el residuo (Rp+t−q)·n es el mismo
+            // sin importar cuál punto de esa misma cara se elija como `q`,
+            // porque todos están en el mismo plano tangente. Donde SÍ
+            // importa es cerca de aristas/esquinas: `voxelSubsample`
+            // (submuestreo "primer punto que cae en la celda") podía
+            // devolver, como representante de una celda cercana a una
+            // arista, un vértice de la cara vecina — con una normal muy
+            // distinta, contaminando el Jacobiano de esa correspondencia.
+            // Buscar en el arreglo completo (el hash sigue siendo O(1)
+            // amortizado; solo cambia el conjunto de candidatos, no el
+            // algoritmo de búsqueda) elimina esa pérdida de candidatos por
+            // adelgazamiento. `source` sigue submuestreado — no es donde
+            // vivía el problema, y sigue siendo el control de cuántos
+            // puntos se transforman/emparejan por iteración.
+            //
+            // `TriangleHash` reemplaza la búsqueda punto→vértice más cercano
+            // (fixes.md, "correspondencia punto→triángulo"): con solo
+            // vértices, la correspondencia más cercana posible está acotada
+            // por el espaciado real entre vértices del target — el
+            // espaciado del sensor LiDAR, no un parámetro que el algoritmo
+            // controle. `TriangleHash.nearest()` proyecta el punto fuente
+            // sobre la superficie del triángulo más cercano (Ericson,
+            // "Real-Time Collision Detection", 2005, §5.1.5), reduciendo ese
+            // error de cuantización a segundo orden dentro de cada cara.
+            //
+            // El tamaño de celda del hash NO puede derivarse solo de
+            // `voxelSize`: `nearest()` busca en un vecindario de 3×3×3
+            // celdas, así que su radio de captura real es ~cellSize (en el
+            // peor caso, un punto en el borde de su celda). Con
+            // `cellSize = voxelSize*2` (como antes), ese radio se achica a
+            // la par de cada nivel más fino — en el nivel más fino
+            // (ej. 0.02) puede terminar bastante por debajo de
+            // `options.maxCorrespondenceDistance` (ej. 0.10), que es el
+            // radio que el llamador cree que está pidiendo. El síntoma
+            // medido: si el nivel anterior deja el error de registro más
+            // lejos que ese radio recortado, el nivel fino encuentra casi
+            // ninguna correspondencia y muere en su primer paso — no
+            // porque `maxCorrespondenceDistance` lo prohíba, sino porque el
+            // hash nunca llega a buscar tan lejos (fixes.md, "convergencia
+            // de ICP a menos de 1 mm"). El tamaño de celda ahora garantiza
+            // un radio de captura de al menos `maxCorrespondenceDistance`
+            // en cualquier nivel, independiente de `voxelSize`.
+            let hashCellSize = max(voxelSize * 2, options.maxCorrespondenceDistance)
+            let targetHash = TriangleHash(mesh: effectiveTarget, cellSize: hashCellSize)
 
             let cosNormalMax = cos(options.normalCompatibilityAngleDegrees * .pi / 180)
+
+            var prevRMSE: Float = .infinity
 
             for iter in 0..<options.maxIterations {
                 // Transformar source points
                 let srcTransformed = srcPts.map { transform.applyAffine($0.point) }
 
-                // Correspondencias via hash espacial
-                var correspondences: [(srcIdx: Int, tgtPt: SIMD3<Float>, srcOriginalIdx: Int, tgtOriginalIdx: Int)] = []
+                // Correspondencias via hash de triángulos: `tgtPt` ya es el
+                // punto proyectado sobre la superficie (no un vértice
+                // discreto) y `tgtNormal` su normal interpolada en ese punto
+                // exacto — `nil` si el target no trae normales reales, en
+                // cuyo caso el loop de abajo cae al mismo respaldo de
+                // siempre (dirección fuente→destino).
+                var correspondences: [(srcIdx: Int, tgtPt: SIMD3<Float>, srcOriginalIdx: Int, tgtNormal: SIMD3<Float>?)] = []
                 for (i, sp) in srcTransformed.enumerated() {
-                    if let tgtIdx = targetHash.nearest(to: sp) {
-                        let diff = vecLength(sp - tgtPts[tgtIdx].point)
+                    if let match = targetHash.nearest(to: sp) {
+                        let diff = vecLength(sp - match.point)
                         if diff < options.maxCorrespondenceDistance {
-                            correspondences.append((i, tgtPts[tgtIdx].point, srcPts[i].index, tgtPts[tgtIdx].index))
+                            correspondences.append((i, match.point, srcPts[i].index, match.normal))
                         }
                     }
                 }
@@ -88,9 +138,36 @@ public struct ICPAligner: MeshRegistering, Sendable {
                 let keepCount = max(6, Int(Float(sorted.count) * (1.0 - options.trimmedOutlierFraction)))
                 let kept = Array(sorted.prefix(keepCount))
 
+                // Centroide de los puntos fuente ya transformados en esta
+                // iteración — pivote de la rotación incremental, en vez del
+                // origen del mundo. Sin esto, la rotación incremental gira
+                // `transform.translation` completo alrededor del origen: con
+                // el objeto a ~0.85 m del origen (típico tras aplicar la
+                // transformación acumulada), un error angular de solo unos
+                // pocos grados produce un desplazamiento espurio de
+                // traslación de varios cm — del mismo orden que el residuo
+                // real que se está corrigiendo (verificado: con
+                // maxStepR=0.2 rad y |t|≈0.85 m, el desplazamiento espurio
+                // puede llegar a ≈0.17 m, mayor que
+                // maxCorrespondenceDistance por defecto — explica el colapso
+                // de correspondencias observado de un paso al siguiente y la
+                // divergencia del RMSE desde la primera iteración; ver
+                // fixes.md, "brazo de palanca de la rotación incremental").
+                // Se usa `kept` (post-trim, pre-filtro de compatibilidad de
+                // normales) como aproximación: el centroide no necesita ser
+                // exacto, solo estar en la vecindad correcta del brazo de
+                // palanca real.
+                var centroid = SIMD3<Float>(0, 0, 0)
+                for corr in kept {
+                    centroid += transform.rotation3x3 * srcPts[corr.srcIdx].point + transform.translation
+                }
+                centroid /= Float(kept.count)
+
                 // Construir sistema Gauss-Newton 6×6
                 // Punto-a-plano: minimizar Σ ((R·pi + t - qi)·ni)²
-                // Jacobiano por punto: [n, (Rpi × n)]
+                // Jacobiano por punto: [n, ((Rpi+t-centroid) × n)] — la
+                // rotación incremental pivota en `centroid`, no en el origen
+                // (ver comentario arriba).
                 var JtJ = [Float](repeating: 0, count: 36) // 6×6 simétrica
                 var JtE = [Float](repeating: 0, count: 6)
                 var totalError: Float = 0
@@ -108,10 +185,14 @@ public struct ICPAligner: MeshRegistering, Sendable {
                     let sp = srcPts[corr.srcIdx].point
                     let tgt = corr.tgtPt
 
-                    // Normal del target (si no disponible, usar vector fuente→target)
+                    // Normal en el punto de correspondencia exacto (interpolada
+                    // baricéntricamente por `TriangleHash`, no la de un único
+                    // vértice — ver fixes.md, "correspondencia punto→triángulo").
+                    // Si el target no trae normales reales, respaldo idéntico al
+                    // de siempre: dirección fuente→target.
                     let normal: SIMD3<Float>
-                    if tgtHasNormals, let norms = effectiveTarget.normals, corr.tgtOriginalIdx < norms.count {
-                        normal = norms[corr.tgtOriginalIdx]
+                    if tgtHasNormals, let tgtNormal = corr.tgtNormal {
+                        normal = tgtNormal
                         // Chequeo de compatibilidad de normales
                         let srcNormal = transform.rotation3x3 * (
                             (corr.srcOriginalIdx < (source.normals?.count ?? 0)) ? source.normals![corr.srcOriginalIdx] : normal
@@ -130,8 +211,10 @@ public struct ICPAligner: MeshRegistering, Sendable {
                     totalError += residual * residual
                     usedCount += 1
 
-                    // Cross product: (R * pi) × n
-                    let cross = vecCross(rp, normal)
+                    // Cross product: (R * pi + t - centroid) × n — pivote en
+                    // el centroide, no en el punto absoluto `rp` (ver
+                    // comentario arriba de `centroid`).
+                    let cross = vecCross(rp - centroid, normal)
 
                     // Jacobiano: 6 componentes = [nx, ny, nz, cross.x, cross.y, cross.z]
                     let J: [Float] = [normal.x, normal.y, normal.z, cross.x, cross.y, cross.z]
@@ -153,7 +236,19 @@ public struct ICPAligner: MeshRegistering, Sendable {
                 // transformación ya aplicada. Se guarda como candidato antes
                 // de arriesgar un paso que podría empeorarla.
                 let preUpdateRMSE = sqrt(totalError / Float(usedCount))
-                if preUpdateRMSE < bestRMSE {
+                // El RMSE de candidatos con pocas correspondencias no es
+                // comparable contra uno con muchas: con solo 6-10 puntos
+                // para 6 incógnitas, Gauss-Newton puede sobreajustar
+                // exactamente esos puntos y reportar un RMSE bajo mientras
+                // se aleja de la transformación real (verificado: sin este
+                // piso, un nivel de vóxel fino con apenas 9 correspondencias
+                // llegó a contaminar `bestTransform` con un resultado 9×
+                // peor que el mejor candidato real — fixes.md, "convergencia
+                // de ICP a menos de 1 mm"). 18 = 3× los 6 grados de
+                // libertad, el mínimo habitual para confiar en un ajuste de
+                // mínimos cuadrados.
+                let minCorrespondencesForBest = 18
+                if preUpdateRMSE < bestRMSE, usedCount >= minCorrespondencesForBest {
                     bestRMSE = preUpdateRMSE
                     bestTransform = transform
                 }
@@ -179,8 +274,28 @@ public struct ICPAligner: MeshRegistering, Sendable {
                 let damping = max(diagMean * 1e-3, 1e-8)
                 for i in 0..<6 { JtJ[i * 6 + i] += damping }
 
-                // Resolver sistema 6×6 con eliminación Gauss-Jordan
-                let solution = solve6x6(JtJ, rhs: JtE)
+                // Resolver sistema 6×6 con eliminación Gauss-Jordan. Ecuación
+                // normal de Gauss-Newton: minimizar Σ(eᵢ + Jᵢ·δ)² respecto a
+                // δ da (ΣJᵢJᵢᵀ)·δ = −ΣJᵢ·eᵢ, es decir JtJ·δ = −JtE (con
+                // JtE = ΣJᵢ·eᵢ tal como se acumula arriba) — el signo
+                // negativo es el que hace que δ apunte en la dirección que
+                // REDUCE el residuo, no la que lo aumenta. Resolver
+                // `JtJ·sol = JtE` sin negar (como estaba antes) da
+                // sol = −δ_correcto: el paso resultante apunta
+                // sistemáticamente en la dirección que EMPEORA el ajuste.
+                // Verificado empíricamente antes de este fix: con el signo
+                // sin corregir, el RMSE empeoraba en cada iteración desde la
+                // primera (incluso ya con la rotación incremental centrada
+                // en el centroide, arriba) y el guardián `bestTransform`
+                // terminaba devolviendo literalmente la transformación
+                // inicial sin ningún cambio — el "0.06 m" que se venía
+                // reportando como resultado de convergencia no era tal, era
+                // el error del punto de partida del propio test, nunca
+                // corregido (fixes.md, "signo invertido en la ecuación
+                // normal de Gauss-Newton"). Con el signo corregido: mismo
+                // test, mismo punto de partida, error final medido ≈1.9 mm
+                // (antes: idéntico al punto de partida, ≈62 mm).
+                let solution = solve6x6(JtJ, rhs: JtE.map { -$0 })
                 guard let sol = solution else {
                     if iter == 0 { throw .notConverged }
                     break
@@ -211,7 +326,16 @@ public struct ICPAligner: MeshRegistering, Sendable {
                 if omegaLen > maxStepR { omega *= maxStepR / omegaLen }
 
                 let deltaR = skewToRotation(omega)
-                let deltaT = alpha
+                // Traslación efectiva de `deltaTransform` para que la
+                // rotación incremental pivote en `centroid`, no en el
+                // origen: transform_new = deltaTransform * transform implica
+                // transform_new.translation = deltaR·transform.translation +
+                // deltaT: para que eso equivalga a rotar
+                // (transform.translation − centroid) alrededor de `centroid`
+                // y sumarle `alpha`, deltaT debe ser
+                // `alpha + centroid − deltaR·centroid` (ver fixes.md, "brazo
+                // de palanca de la rotación incremental").
+                let deltaT = alpha + centroid - deltaR * centroid
 
                 let deltaTransform = Matrix4x4(
                     SIMD4(deltaR[0].x, deltaR[0].y, deltaR[0].z, 0),
@@ -234,11 +358,14 @@ public struct ICPAligner: MeshRegistering, Sendable {
         }
 
         // Chequeo de degeneración
-        let conditionNumber = computeConditionNumber(transform: transform, target: effectiveTarget)
+        let (conditionNumber, weakDirections) = computeConditionNumber(
+            target: effectiveTarget,
+            threshold: options.degeneracyConditionThreshold
+        )
         let isDegenerate = conditionNumber > options.degeneracyConditionThreshold
 
         if isDegenerate {
-            throw .degenerate(conditionNumber: conditionNumber)
+            throw .degenerate(conditionNumber: conditionNumber, weakDirections: weakDirections)
         }
 
         // RMSE final
@@ -251,7 +378,8 @@ public struct ICPAligner: MeshRegistering, Sendable {
             iterations: options.maxIterations * options.voxelSizes.count,
             conditionNumber: conditionNumber,
             isDegenerate: isDegenerate,
-            initializationMethod: .geodetic
+            initializationMethod: .geodetic,
+            weakDirections: weakDirections
         )
     }
 
@@ -363,100 +491,119 @@ public struct ICPAligner: MeshRegistering, Sendable {
         return b
     }
 
-    private func computeConditionNumber(transform: Matrix4x4, target: Mesh) -> Float {
-        let r = transform.rotation3x3
-        let t = transform.translation
-
-        var cov = [Float](repeating: 0, count: 36)
+    /// Número de condición del Hessiano punto-a-plano real (H = Σ JᵀJ, J =
+    /// [n, p̂×n]) sobre una muestra del target, y las direcciones de 6-DOF
+    /// que lo dominan. Reemplaza el heurístico de dispersión geométrica que
+    /// vivió aquí antes (ver fixes.md, "computeConditionNumber"): ese primer
+    /// intento con el Hessiano real sobre-marcaba escenas bien
+    /// condicionadas (ej. un cubo con traslación acumulada grande) como
+    /// degeneradas. Causa raíz identificada (no solo "hacía falta más
+    /// tiempo"): comparaba autovalores de H = JᵀJ (que van como κ(J)²)
+    /// contra un umbral calibrado para el heurístico anterior, sin
+    /// normalizar la escala de los puntos — la combinación exacta que
+    /// Gelfand, Ikemoto, Rusinkiewicz & Levoy, "Geometrically Stable
+    /// Sampling for the ICP Algorithm" (3DIM 2003), identifican como
+    /// necesaria para que este número tenga sentido físico independiente
+    /// del tamaño de la escena. Este método corrige eso: centra en el
+    /// centroide, no-dimensionaliza por la escala RMS de la muestra, y
+    /// diagonaliza H en `Double` (no `Float` — la sospecha de pérdida de
+    /// precisión del intento anterior, documentada en el propio historial
+    /// de este archivo, era razonable) vía `SymmetricEigenSolver`.
+    ///
+    /// `threshold` es el mismo `options.degeneracyConditionThreshold` que
+    /// decide `isDegenerate`: una dirección se reporta como "débil" si su
+    /// propia razón σ_max/σ_i ya supera ese umbral por sí sola — así
+    /// `weakDirections` es exactamente el conjunto de direcciones
+    /// responsables de que `isDegenerate` sea cierto, sin un segundo umbral
+    /// mágico que mantener sincronizado.
+    private func computeConditionNumber(
+        target: Mesh,
+        threshold: Float
+    ) -> (conditionNumber: Float, weakDirections: [WeakDirection]) {
         let sample = voxelSubsample(target.vertices, cellSize: 0.1)
-        let n = Float(sample.count)
+        guard sample.count >= 6 else { return (1e7, []) }
 
-        guard n >= 6 else { return 1e7 }
+        // Normales reales si el target las trae (mismo criterio que
+        // `align()`); si no, se derivan de la topología del propio target
+        // — a diferencia del respaldo usado dentro del bucle de Gauss-
+        // Newton (que solo tiene la dirección fuente→destino por
+        // correspondencia disponible), aquí sí se dispone de la malla
+        // completa con sus caras.
+        let normals: [SIMD3<Float>]
+        if let real = target.normals, real.count == target.vertices.count {
+            normals = sample.map { real[$0.index] }
+        } else {
+            let computed = MeshOps().computeVertexNormals(target).map { vecNormalize($0) }
+            normals = sample.map { computed[$0.index] }
+        }
 
-        // NOTA (auditoría, ver fixes.md): se intentó reemplazar este
-        // heurístico por el Hessiano real punto-a-plano (producto externo
-        // de [normal, rp×normal] por punto, igual que JtJ en align()), que
-        // sí detecta correctamente una pared plana grande como degenerada
-        // — pero sobre-marca como degenerada una escena con normales en
-        // varias direcciones (ej. un cubo) cuando la transformación acumula
-        // una traslación grande, incluso evaluando las columnas
-        // rotacionales alrededor del centroide de la muestra en vez del
-        // origen del mundo. No se pudo aislar la causa raíz exacta (posible
-        // pérdida de precisión en el determinante 6×6 en Float) con
-        // confianza dentro del tiempo disponible, así que se mantiene este
-        // heurístico de dispersión geométrica — menos fiel al problema real
-        // de punto-a-plano, pero sin el falso positivo sobre escenas no
-        // degeneradas.
+        // Centroide de la muestra, en Double desde el principio.
+        var cx = 0.0, cy = 0.0, cz = 0.0
+        for (p, _) in sample { cx += Double(p.x); cy += Double(p.y); cz += Double(p.z) }
+        let count = Double(sample.count)
+        cx /= count; cy /= count; cz /= count
+
+        // Escala característica: RMS de la distancia al centroide. No-
+        // dimensionaliza el bloque rotacional del Hessiano (p̂×n, unidades
+        // de longitud) para que sea comparable en magnitud al bloque
+        // traslacional (n, siempre unitario) — sin esto, la misma escena
+        // geométrica a otra escala física (o la misma escena con más
+        // traslación acumulada) da un número de condición distinto por
+        // pura escala, no por una diferencia real de condicionamiento.
+        var sumSq = 0.0
         for (p, _) in sample {
-            let rp = r * p + t
-            let gx: SIMD3<Float> = SIMD3(1, 0, 0)
-            let gy: SIMD3<Float> = SIMD3(0, 1, 0)
-            let gz: SIMD3<Float> = SIMD3(0, 0, 1)
-            let gw: SIMD3<Float> = vecCross(rp, SIMD3(1,0,0))
-            let gv: SIMD3<Float> = vecCross(rp, SIMD3(0,1,0))
-            let gu: SIMD3<Float> = vecCross(rp, SIMD3(0,0,1))
+            let dx = Double(p.x) - cx, dy = Double(p.y) - cy, dz = Double(p.z) - cz
+            sumSq += dx * dx + dy * dy + dz * dz
+        }
+        let scale = (sumSq / count).squareRoot()
+        guard scale > 1e-9 else { return (1e7, []) } // toda la muestra en un punto: sin información
 
-            let J: [SIMD3<Float>] = [gx, gy, gz, gw, gv, gu]
+        // H = Σ JᵀJ, J = [n, p̂×n], p̂ = (p - centroide) / escala. Igual
+        // estructura que el Jacobiano punto-a-plano de `align()`.
+        var h = [[Double]](repeating: [Double](repeating: 0, count: 6), count: 6)
+        for (idx, (p, _)) in sample.enumerated() {
+            let n = normals[idx]
+            guard vecLength(n) > 1e-6 else { continue }
+            let px = (Double(p.x) - cx) / scale
+            let py = (Double(p.y) - cy) / scale
+            let pz = (Double(p.z) - cz) / scale
+            let nx = Double(n.x), ny = Double(n.y), nz = Double(n.z)
+            let cross = (px: py * nz - pz * ny, py: pz * nx - px * nz, pz: px * ny - py * nx)
+            let j = [nx, ny, nz, cross.px, cross.py, cross.pz]
             for r in 0..<6 {
                 for c in r..<6 {
-                    let val = vecDot(J[r], J[c]) / n
-                    cov[r * 6 + c] += val
+                    h[r][c] += j[r] * j[c]
                 }
             }
         }
+        for r in 0..<6 { for c in 0..<r { h[r][c] = h[c][r] } }
 
-        for r in 0..<6 {
-            for c in 0..<r {
-                cov[r * 6 + c] = cov[c * 6 + r]
+        let eig = SymmetricEigenSolver.solve(h)
+        // σ = √λ (H es semidefinida positiva por construcción; λ<0 solo por
+        // ruido numérico residual se trata como 0). σ vive en la misma
+        // escala que las filas de J, no la de H — evita reportar el
+        // cuadrado inflado directamente en el veredicto.
+        let sigmas = eig.values.map { $0 > 0 ? $0.squareRoot() : 0.0 }
+        guard let sigmaMax = sigmas.max(), sigmaMax > 1e-12 else { return (1e7, []) }
+        let sigmaMin = max(sigmas.min() ?? 0, 1e-300)
+        let conditionNumber = Float(min(sigmaMax / sigmaMin, 1e7))
+
+        let axes: [DegenerateAxis] = [.translationX, .translationY, .translationZ, .rotationX, .rotationY, .rotationZ]
+        var weak: [(axis: DegenerateAxis, sigma: Double, ratio: Double)] = []
+        for k in 0..<6 {
+            let ratio = sigmaMax / max(sigmas[k], 1e-300)
+            guard ratio > Double(threshold) else { continue }
+            var bestIdx = 0
+            var bestMag = abs(eig.vectors[0][k])
+            for i in 1..<6 {
+                let m = abs(eig.vectors[i][k])
+                if m > bestMag { bestMag = m; bestIdx = i }
             }
+            weak.append((axis: axes[bestIdx], sigma: sigmas[k], ratio: ratio))
         }
+        weak.sort { $0.ratio > $1.ratio }
 
-        // Traza como proxy de número de condición (más estable que eigenvalores)
-        var trace: Float = 0
-        for i in 0..<6 { trace += cov[i * 6 + i] }
-
-        // Si la traza es cero, la nube es completamente degenerada
-        guard trace > 1e-10 else { return 1e7 }
-
-        // Determinante como proxy de condicionalidad
-        // Para una nube plana, el determinante tiende a 0 → condición alta
-        let det = determinant6x6(cov)
-        let cond = abs(trace * trace / max(det, 1e-15))
-
-        return min(cond, 1e7)
-    }
-
-    private func determinant6x6(_ A: [Float]) -> Float {
-        // Usar eliminación gaussiana para calcular el determinante
-        var M = A
-        var det: Float = 1
-        for col in 0..<6 {
-            var pivot = abs(M[col * 6 + col])
-            var pivotRow = col
-            for row in (col+1)..<6 {
-                if abs(M[row * 6 + col]) > pivot {
-                    pivot = abs(M[row * 6 + col])
-                    pivotRow = row
-                }
-            }
-            if pivot < 1e-15 { return 0 }
-            if pivotRow != col {
-                det = -det
-                for c in 0..<6 {
-                    let tmp = M[col * 6 + c]
-                    M[col * 6 + c] = M[pivotRow * 6 + c]
-                    M[pivotRow * 6 + c] = tmp
-                }
-            }
-            det *= M[col * 6 + col]
-            for row in (col+1)..<6 {
-                let factor = M[row * 6 + col] / M[col * 6 + col]
-                for c in col..<6 {
-                    M[row * 6 + c] -= factor * M[col * 6 + c]
-                }
-            }
-        }
-        return det
+        return (conditionNumber, weak.map { WeakDirection(axis: $0.axis, sigma: Float($0.sigma)) })
     }
 
     private func computeRMSE(source: Mesh, target: Mesh, transform: Matrix4x4) -> Float {
@@ -523,6 +670,106 @@ private struct SpatialHash {
         }
 
         return bestIdx
+    }
+
+    private func vecDistSq(_ a: SIMD3<Float>, _ b: SIMD3<Float>) -> Float {
+        let d = a - b
+        return d.x * d.x + d.y * d.y + d.z * d.z
+    }
+}
+
+// MARK: - Triangle Hash (correspondencia punto→superficie)
+
+/// Como `SpatialHash`, pero busca el punto más cercano sobre la SUPERFICIE de
+/// la malla (proyectado dentro de un triángulo vía `closestPointOnTriangle`),
+/// no el vértice discreto más cercano. Cada triángulo se indexa por la celda
+/// de su centroide — igual criterio que `SpatialHash` usa por vértice — así
+/// que el radio de captura real sigue siendo ~`cellSize` en el peor caso; un
+/// triángulo grande cuyo centroide cae fuera del vecindario 3×3×3 del punto
+/// de consulta puede perderse como candidato, la misma limitación que ya
+/// tenía la búsqueda por vértices, documentada donde se calcula
+/// `hashCellSize` en `align()`. Con `indices` vacío (nube de puntos sin
+/// triangulación) cada vértice se indexa como un triángulo degenerado
+/// (a==b==c) — `closestPointOnTriangle` lo trata como punto único, así que el
+/// comportamiento se reduce exactamente al de la búsqueda por vértices.
+private struct TriangleHash {
+    private var grid: [SIMD3<Int>: [Int]] = [:]
+    private let vertices: [SIMD3<Float>]
+    private let indices: [UInt32]
+    private let normals: [SIMD3<Float>]?
+    private let cellSize: Float
+    private let triangleCount: Int
+
+    init(mesh: Mesh, cellSize: Float) {
+        self.vertices = mesh.vertices
+        self.indices = mesh.indices
+        self.normals = mesh.normals
+        self.cellSize = cellSize
+        self.triangleCount = indices.isEmpty ? vertices.count : indices.count / 3
+
+        for t in 0..<triangleCount {
+            let (a, b, c, _, _, _) = triangleVertices(t)
+            let centroid = (a + b + c) / 3
+            grid[cellKey(centroid), default: []].append(t)
+        }
+    }
+
+    /// Vértices del triángulo `t` y sus índices originales. Sin `indices`
+    /// (nube de puntos), el triángulo `t` es el vértice `t` repetido 3 veces.
+    private func triangleVertices(_ t: Int) -> (SIMD3<Float>, SIMD3<Float>, SIMD3<Float>, Int, Int, Int) {
+        if indices.isEmpty {
+            return (vertices[t], vertices[t], vertices[t], t, t, t)
+        }
+        let ia = Int(indices[t * 3]), ib = Int(indices[t * 3 + 1]), ic = Int(indices[t * 3 + 2])
+        return (vertices[ia], vertices[ib], vertices[ic], ia, ib, ic)
+    }
+
+    private func cellKey(_ p: SIMD3<Float>) -> SIMD3<Int> {
+        SIMD3<Int>(Int(floor(p.x / cellSize)), Int(floor(p.y / cellSize)), Int(floor(p.z / cellSize)))
+    }
+
+    /// Punto más cercano sobre la superficie a `query`, junto con la normal
+    /// en ese punto exacto — interpolada baricéntricamente entre los 3
+    /// vértices del triángulo si `mesh.normals` existe (más precisa que la
+    /// normal de un único vértice cerca de una zona de curvatura), o `nil` si
+    /// el target no trae normales reales (el llamador cae a su propio
+    /// respaldo, igual que antes de este cambio).
+    func nearest(to query: SIMD3<Float>) -> (point: SIMD3<Float>, normal: SIMD3<Float>?, triangleIndex: Int)? {
+        let key = cellKey(query)
+
+        var bestDist: Float = .infinity
+        var best: (point: SIMD3<Float>, barycentric: SIMD3<Float>, triangle: Int)?
+
+        for dx in -1...1 {
+            for dy in -1...1 {
+                for dz in -1...1 {
+                    let nKey = SIMD3<Int>(key.x + dx, key.y + dy, key.z + dz)
+                    guard let candidates = grid[nKey] else { continue }
+                    for t in candidates {
+                        let (a, b, c, _, _, _) = triangleVertices(t)
+                        let proj = closestPointOnTriangle(query, a, b, c)
+                        let d2 = vecDistSq(query, proj.point)
+                        if d2 < bestDist {
+                            bestDist = d2
+                            best = (proj.point, proj.barycentric, t)
+                        }
+                    }
+                }
+            }
+        }
+
+        guard let match = best else { return nil }
+
+        var interpolatedNormal: SIMD3<Float>?
+        if let norms = normals {
+            let (_, _, _, ia, ib, ic) = triangleVertices(match.triangle)
+            if ia < norms.count, ib < norms.count, ic < norms.count {
+                let n = norms[ia] * match.barycentric.x + norms[ib] * match.barycentric.y + norms[ic] * match.barycentric.z
+                interpolatedNormal = vecNormalize(n)
+            }
+        }
+
+        return (match.point, interpolatedNormal, match.triangle)
     }
 
     private func vecDistSq(_ a: SIMD3<Float>, _ b: SIMD3<Float>) -> Float {

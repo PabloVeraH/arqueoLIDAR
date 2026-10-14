@@ -10,14 +10,20 @@ que ambas estén equivocadas de la misma manera.
 
 Uso:
     python3 check_utm.py
+        Valida el MÉTODO (Krüger orden 8) contra pyproj usando puntos de
+        control publicados y un round-trip interno — pyproj comparado
+        contra sí mismo, no contra la app.
 
-Este script valida el MÉTODO (Krüger orden 8) contra pyproj. Para comparar contra
-la app, exporta el archivo tools/utm_reference.txt generado por la app (el test
-de Swift `GeoTests` imprime los mismos puntos) y usa --file.
+    python3 check_utm.py --file tools/utm_reference.txt
+        Además del check anterior, cruza pyproj contra el UTMConverter real
+        de la app. tools/utm_reference.txt se genera así (desde PaleoRegistro/):
+
+            swift run UTMReferenceDump > ../tools/utm_reference.txt
 
 Requisitos: pip install pyproj
 """
 
+import argparse
 import math
 import sys
 
@@ -40,39 +46,48 @@ def to_utm(lat: float, lon: float) -> tuple:
     return easting, northing, zone, hemisphere, epsg
 
 
-# Puntos de control publicados en Chile (lat, lon, easting, northing, zona).
-# Fuentes: IGM Chile / OpenStreetMap (coordenadas aproximadas, no geodésicas).
+# Puntos de control: los mismos (lat, lon) que `GeoTests.zone18Points` /
+# `zone19Points` / `zone12Points` en Swift, con easting/northing calculados
+# por `pyproj` (EPSG:32718/32719/32712) — no aproximaciones de mapa. Antes
+# de este fix, esta tabla tenía valores redondeados a mano (fuente: IGM/OSM
+# "aproximada, no geodésica") que además clasificaban mal el huso de 3 de
+# sus 8 puntos, así que el propio check_utm.py reportaba `[DISCREPANCIA]`
+# de hasta 2295 m en todos — no porque el `UTMConverter` estuviera mal, sino
+# porque la tabla de referencia de este script sí lo estaba (fixes.md).
 CONTROL_POINTS = [
     # Huso 18S
-    (-33.42536, -70.63340, 348_118.7, 6_300_560.8, 18),
-    (-33.45000, -70.66667, 345_000.0, 6_297_810.0, 18),
-    (-33.00000, -69.00000, 500_000.0, 6_347_410.0, 18),
+    (-33.42536, -73.50000, 639_453.8321, 6_300_550.3071, 18),
+    (-27.00000, -75.00000, 500_000.0000, 7_013_564.7574, 18),
+    (-45.00000, -74.00000, 578_815.3029, 5_016_563.2317, 18),
     # Huso 19S
-    (-53.16000, -70.91667, 372_000.0, 4_107_760.0, 19),
-    (-53.00000, -68.00000, 567_500.0, 4_125_000.0, 19),
-    (-52.50000, -71.50000, 330_000.0, 4_181_000.0, 19),
+    (-53.16000, -70.91667, 371_854.2814, 4_108_214.9013, 19),
+    (-53.00000, -68.00000, 567_109.4354, 4_127_261.7386, 19),
+    (-52.50000, -71.50000, 330_306.2303, 4_180_410.0708, 19),
     # Huso 12S
-    (-27.11667, -109.36667, 661_000.0, 7_000_000.0, 12),
-    (-27.15000, -109.43333, 654_500.0, 6_996_300.0, 12),
+    (-27.11667, -109.36667, 661_896.4774, 6_999_590.3797, 12),
+    (-27.15000, -109.43333, 655_242.0569, 6_995_982.0301, 12),
 ]
 
 
-def main():
+def check_control_points() -> float:
     print("=== Verificación UTM: pyproj vs puntos de control ===")
     max_error = 0.0
     for lat, lon, ref_e, ref_n, ref_zone in CONTROL_POINTS:
         e, n, zone, hem, epsg = to_utm(lat, lon)
-        # Los puntos de control son aproximados (no geodésicos), tolerancia 5 m
+        # Valores de referencia calculados con pyproj: tolerancia 1 mm, la
+        # misma que exige el plan (§3, F8) y que usa GeoTests.
         d = math.hypot(e - ref_e, n - ref_n)
         max_error = max(max_error, d)
-        status = "OK" if d < 5.0 else "DISCREPANCIA"
-        print(f"  ({lat:+.5f}, {lon:+.5f}) → E={e:.1f} N={n:.1f} zona={zone} "
-              f"epsg={epsg} | error={d:.2f} m [{status}]")
+        status = "OK" if d < 0.001 else "DISCREPANCIA"
+        print(f"  ({lat:+.5f}, {lon:+.5f}) → E={e:.4f} N={n:.4f} zona={zone} "
+              f"epsg={epsg} | error={d * 1000:.3f} mm [{status}]")
 
-    print(f"\nError máximo contra puntos de control: {max_error:.2f} m")
-    print("(los puntos de control son aproximados; tolerancia 5 m)")
+    print(f"\nError máximo contra puntos de control: {max_error * 1000:.3f} mm (objetivo < 1 mm)")
+    return max_error
 
-    print("\n=== Round-trip lat/lon → UTM → lat/lon ===")
+
+def check_internal_round_trip() -> float:
+    print("\n=== Round-trip lat/lon → UTM → lat/lon (solo pyproj) ===")
     max_rt = 0.0
     test_points = [
         (-17.5, -72.0), (-17.5, -66.0), (-56.0, -75.0), (-56.0, -66.0),
@@ -90,13 +105,113 @@ def main():
         print(f"  ({lat:+.5f}, {lon:+.5f}) → error round-trip = {d:.4f} mm")
 
     print(f"\nError round-trip máximo: {max_rt * 1000:.4f} mm (objetivo < 0.1 mm)")
+    return max_rt
 
-    if max_rt * 1000 < 0.1:
-        print("RESULTADO: OK. La conversión UTM es consistente con pyproj.")
-        return 0
+
+def parse_reference_file(path: str) -> list:
+    """Lee el CSV que produce `swift run UTMReferenceDump`:
+    lat,lon,easting,northing,zone,hemisphere,epsg — una línea por punto,
+    líneas que empiezan con '#' o vacías se ignoran."""
+    rows = []
+    with open(path, "r", encoding="utf-8") as f:
+        for lineno, raw in enumerate(f, start=1):
+            line = raw.strip()
+            if not line or line.startswith("#"):
+                continue
+            parts = line.split(",")
+            if len(parts) != 7:
+                print(f"ADVERTENCIA: {path}:{lineno} tiene {len(parts)} campos, se esperaban 7 — línea ignorada")
+                continue
+            lat, lon, easting, northing, zone, hemisphere, epsg = parts
+            rows.append({
+                "lat": float(lat), "lon": float(lon),
+                "easting": float(easting), "northing": float(northing),
+                "zone": int(zone), "hemisphere": hemisphere.strip(),
+                "epsg": int(epsg),
+            })
+    return rows
+
+
+def check_against_app(path: str, tolerance_m: float = 0.001) -> bool:
+    """Cruza el UTMConverter real de la app (volcado a `path` por
+    UTMReferenceDump) contra pyproj: para cada punto, recalcula zona/
+    hemisferio/EPSG y easting/northing de forma independiente y compara.
+    Antes de este fix, check_utm.py no tenía ninguna forma de hacer esto —
+    solo se comparaba pyproj contra sí mismo."""
+    print(f"\n=== Cruce contra la app: pyproj vs UTMConverter ({path}) ===")
+    try:
+        rows = parse_reference_file(path)
+    except OSError as exc:
+        print(f"ERROR: no se pudo leer {path}: {exc}")
+        return False
+
+    if not rows:
+        print(f"ERROR: {path} no contiene puntos válidos.")
+        return False
+
+    max_error = 0.0
+    zone_mismatches = 0
+    for r in rows:
+        e, n, zone, hem, epsg = to_utm(r["lat"], r["lon"])
+        if zone != r["zone"] or hem != r["hemisphere"] or epsg != r["epsg"]:
+            zone_mismatches += 1
+            print(
+                f"  ({r['lat']:+.5f}, {r['lon']:+.5f}) → DISCREPANCIA DE ZONA: "
+                f"app=huso{r['zone']}/{r['hemisphere']}/epsg{r['epsg']} "
+                f"pyproj=huso{zone}/{hem}/epsg{epsg}"
+            )
+            continue
+        d = math.hypot(e - r["easting"], n - r["northing"])
+        max_error = max(max_error, d)
+        status = "OK" if d < tolerance_m else "DISCREPANCIA"
+        print(
+            f"  ({r['lat']:+.5f}, {r['lon']:+.5f}) → huso={zone} "
+            f"app(E={r['easting']:.4f}, N={r['northing']:.4f}) "
+            f"pyproj(E={e:.4f}, N={n:.4f}) | error={d * 1000:.3f} mm [{status}]"
+        )
+
+    print(f"\nError máximo app vs pyproj: {max_error * 1000:.3f} mm (objetivo < {tolerance_m * 1000:.1f} mm)")
+    if zone_mismatches:
+        print(f"Discrepancias de zona/hemisferio/EPSG: {zone_mismatches}")
+
+    passed = zone_mismatches == 0 and max_error < tolerance_m
+    print("RESULTADO: OK. El UTMConverter de la app coincide con pyproj." if passed
+          else "RESULTADO: REVISAR. El UTMConverter de la app difiere de pyproj más allá de la tolerancia.")
+    return passed
+
+
+def main() -> int:
+    parser = argparse.ArgumentParser(description="Verificación externa del UTMConverter (F8).")
+    parser.add_argument(
+        "--file", metavar="PATH",
+        help="CSV generado por 'swift run UTMReferenceDump' (lat,lon,easting,northing,zone,hemisphere,epsg). "
+             "Si se entrega, cruza el UTMConverter real de la app contra pyproj, además del check interno.",
+    )
+    parser.add_argument(
+        "--tolerance-mm", type=float, default=1.0,
+        help="Tolerancia en milímetros para el cruce --file (por defecto 1.0 mm, igual que GeoTests).",
+    )
+    args = parser.parse_args()
+
+    max_cp = check_control_points()
+    max_rt = check_internal_round_trip()
+    internal_ok = max_cp < 0.001 and max_rt * 1000 < 0.1
+
+    app_ok = True
+    if args.file:
+        app_ok = check_against_app(args.file, tolerance_m=args.tolerance_mm / 1000.0)
     else:
-        print("RESULTADO: REVISAR. El error de round-trip supera el objetivo.")
-        return 1
+        print(
+            "\n(No se entregó --file: este check nunca ejercita el UTMConverter real de la app. "
+            "Genera tools/utm_reference.txt con 'swift run UTMReferenceDump' y vuelve a correr "
+            "con --file para cerrar ese hueco.)"
+        )
+
+    if internal_ok and app_ok:
+        print("\nRESULTADO GLOBAL: OK.")
+        return 0
+    print("\nRESULTADO GLOBAL: REVISAR.")
+    return 1
 
 
 if __name__ == "__main__":

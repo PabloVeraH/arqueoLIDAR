@@ -126,7 +126,12 @@ struct ICPAlignerTests {
 
     @Test("ICP: recupera transformación conocida con ruido de 3 mm")
     func recoversKnownTransform() throws {
-        let mesh = denseCubeMesh(size: 0.5, divisions: 3)
+        // divisions:8 (espaciado real ~0.0625 m), no divisions:3 (~0.167 m):
+        // con divisions:3 el error no baja de ~0.20 m pase lo que pase con
+        // el resto de los parámetros. La densidad de malla importaba, pero
+        // no era el factor dominante que parecía ser mientras el signo de
+        // la ecuación normal estuvo invertido (ver nota grande más abajo).
+        let mesh = denseCubeMesh(size: 0.5, divisions: 8)
         let trueTransform = rotationMatrix4x4(yawDeg: 12.7, pitchDeg: 5.3, rollDeg: -3.1,
                                                 translation: SIMD3(0.85, 0.12, -0.34))
 
@@ -139,9 +144,8 @@ struct ICPAlignerTests {
         // residuo punto-a-plano degenera en punto-a-punto con un jacobiano
         // poco informativo (normal·normal = 1 siempre, sin importar la
         // calidad real del ajuste) y el refinamiento no logra avanzar nada
-        // en este cubo pequeño y disperso. Con normales reales converge
-        // (aunque no hasta la precisión sub-cm que pide el plan — ver nota
-        // más abajo y fixes.md).
+        // en este cubo pequeño y disperso. Con normales reales converge a
+        // sub-cm — ver nota más abajo y fixes.md.
         let baseNormals = MeshOps().computeVertexNormals(mesh).map { vecNormalize($0) }
         let source = Mesh(vertices: noisy, indices: mesh.indices, normals: baseNormals)
         let targetNormals = baseNormals.map { trueTransform.rotation3x3 * $0 }
@@ -158,12 +162,13 @@ struct ICPAlignerTests {
         let initialGuess = rotationMatrix4x4(yawDeg: 12.7 + 3, pitchDeg: 5.3 - 1, rollDeg: -3.1 + 1,
                                               translation: SIMD3(0.85 + 0.05, 0.12 - 0.02, -0.34 + 0.03))
 
-        // Mismos tamaños de vóxel que el test de convergencia desde 20° de
-        // abajo (ya validado con esta misma malla de 0.5 m/divisions:3,
-        // cuyo espaciado real entre vértices es ~0.167 m): un vóxel de 0.02
-        // da un radio de búsqueda de correspondencias (hash cellSize =
-        // voxelSize·2 = 0.04) menor que ese espaciado, y el ICP se queda sin
-        // correspondencias reales para casi todos los puntos.
+        // Un nivel de vóxel más fino que 0.05 (ej. 0.02) no aporta nada con
+        // esta densidad de malla — verificado: el nivel más fino nunca junta
+        // más de ~9 correspondencias (contra las ~18 que exige
+        // `minCorrespondencesForBest` en `align()` para que un candidato
+        // cuente como "mejor"), así que no llega a contribuir. Haría falta
+        // una nube considerablemente más densa que la de este test sintético
+        // para que un vóxel de 0.02 tuviera datos suficientes de verdad.
         let options = ICPOptions(voxelSizes: [0.1, 0.05], maxIterations: 50)
         let result = try aligner.align(source: source, target: target, initial: initialGuess, options: options)
 
@@ -171,34 +176,69 @@ struct ICPAlignerTests {
         let recoveredT = result.transform.translation
         let trueT = trueTransform.translation
 
-        // El plan pide <1 mm; verificado hoy en 0.20 m — muy por debajo de
-        // esa meta. La corrección del bug de ejes/traspuesta en
-        // Matrix3x3/Matrix4x4 (fixes.md, Domain/MathTypes.swift) fue lo que
-        // hizo que ICPAligner convergiera de verdad por primera vez (antes,
-        // cualquier composición transform=delta*transform quedaba
-        // corrompida y el resultado no se movía del punto inicial). La
-        // precisión sub-cm que falta parece un problema de conditioning
-        // adicional (nearest-neighbor entre caras de un cubo, pocas
-        // correspondencias) que queda documentado en fixes.md como
-        // pendiente, no oculto detrás de una tolerancia artificialmente
-        // floja.
+        // El plan pide <1 mm; verificado hoy en ≈1.9 mm — dentro del margen
+        // esperable dado el ruido de entrada inyectado (σ=3 mm). Historial
+        // de esta cifra, dos rondas de fixes en la cadena
+        // correspondencia→convergencia (fixes.md, "convergencia de ICP a
+        // menos de 1 mm"):
+        //
+        // Ronda 1 (cuatro bugs, 0.20 m → 0.06 m):
+        //   1. La correspondencia se buscaba solo entre los representantes
+        //      de `voxelSubsample` del target, no en la nube completa —
+        //      perdía candidatos por adelgazamiento cerca de límites entre
+        //      caras.
+        //   2. El radio de búsqueda del hash espacial (`cellSize =
+        //      voxelSize·2`, vecindario 3×3×3) se achicaba en cada nivel más
+        //      fino independientemente de `maxCorrespondenceDistance` — un
+        //      nivel fino podía quedar con un radio de captura menor al que
+        //      el propio `ICPOptions` prometía.
+        //   3. `prevRMSE` (criterio de corte "empeoró >10%") no se
+        //      reiniciaba entre niveles de vóxel — comparaba el RMSE de un
+        //      nivel fino (otro conjunto de correspondencias, otra escala de
+        //      residuo) contra el último RMSE del nivel anterior, matando el
+        //      nivel fino en su primera iteración.
+        //   4. Al corregir 2 y 3, un nivel fino con muy pocas
+        //      correspondencias (ej. 9, para 6 incógnitas) podía sobreajustar
+        //      exactamente esos puntos, reportar un RMSE bajo, y contaminar
+        //      `bestTransform` con un resultado peor que el mejor candidato
+        //      real — de ahí `minCorrespondencesForBest`.
+        //
+        // Ronda 2 (el bug real detrás del "0.06 m" que parecía un piso de
+        // densidad de nube, 0.06 m → ≈0.002 m): el signo de la ecuación
+        // normal de Gauss-Newton estaba invertido — `JtJ·sol = JtE` en vez
+        // de `JtJ·sol = −JtE` — así que cada paso se aplicaba en la
+        // dirección que EMPEORA el residuo, no la que lo reduce. El
+        // guardián `bestTransform` (Ronda 1, punto 4) enmascaraba esto por
+        // completo: como cada paso real empeoraba el RMSE, el guardián
+        // nunca encontraba nada mejor que la transformación INICIAL sin
+        // ningún cambio, y devolvía esa — el "0.06 m" no era convergencia,
+        // era el error del punto de partida del propio test, nunca
+        // corregido (verificado: `result.transform` era bit-a-bit idéntico
+        // a `initialGuess` antes de este fix). Junto con el signo, se
+        // corrigió también que la rotación incremental pivotaba sobre el
+        // origen del mundo en vez del centroide de las correspondencias
+        // activas — con la traslación acumulada ya en ~0.9 m, un pequeño
+        // error angular producía un desplazamiento espurio de varios cm
+        // (mismo orden que el residuo real a corregir). Ver fixes.md,
+        // "signo invertido en la ecuación normal de Gauss-Newton", para la
+        // derivación completa y la traza de depuración que lo expuso.
         let transErr = vecLength(recoveredT - trueT)
-        #expect(transErr < 0.25, "Error de traslación \(transErr) m excede 0.25 m")
+        #expect(transErr < 0.005, "Error de traslación \(transErr) m excede 5 mm")
         #expect(!result.isDegenerate)
     }
 
-    @Test("ICP: escena de un solo plano → DegeneracyCheck detecta y rechaza")
+    @Test("ICP: escena de un solo plano → DegeneracyCheck detecta y rechaza, con direcciones débiles correctas")
     func planarDegeneracyRejected() throws {
         let rawPlane = planeMesh(size: 3.0, divisions: 10)
-        // Normales reales, para cuando computeConditionNumber use el
-        // Hessiano punto-a-plano real en vez del heurístico de dispersión
-        // geométrica genérica actual (ver nota en
-        // Sources/Registration/ICPAligner.swift, computeConditionNumber, y
-        // fixes.md): se probó esa versión y detecta correctamente una pared
-        // plana, pero sobre-marca como degenerada una escena con normales
-        // en varias direcciones (ej. un cubo) — queda pendiente arreglar
-        // sin ese efecto secundario. Con el heurístico actual estas
-        // normales no se usan.
+        // Normales reales: computeConditionNumber ahora usa el Hessiano
+        // punto-a-plano real (fixes.md, "computeConditionNumber") — el
+        // primer intento de esto sobre-marcaba escenas bien condicionadas
+        // (ej. un cubo) como degeneradas; causa raíz identificada: comparar
+        // autovalores de H=JᵀJ (que van como κ(J)²) contra un umbral
+        // calibrado para el heurístico anterior, sin normalizar la escala
+        // de los puntos. Corregido con normalización de escala (Gelfand,
+        // Ikemoto, Rusinkiewicz & Levoy, 3DIM 2003) y descomposición
+        // espectral en Double.
         let planeNormals = MeshOps().computeVertexNormals(rawPlane).map { vecNormalize($0) }
         let plane = Mesh(vertices: rawPlane.vertices, indices: rawPlane.indices, normals: planeNormals)
 
@@ -214,22 +254,38 @@ struct ICPAlignerTests {
             normals: planeNormals.map { shiftTransform.rotation3x3 * $0 }
         )
 
-        // Umbral calibrado contra el heurístico de dispersión geométrica
-        // actual (mide ~30 para esta escena) — no un umbral físicamente
-        // derivado. Con el Hessiano punto-a-plano real (ver nota arriba)
-        // este número sería mucho más alto y no habría que ajustarlo a mano
-        // por escena.
-        let options = ICPOptions(degeneracyConditionThreshold: 25.0)
+        // Umbral por defecto (1e6): con el Hessiano real y escala
+        // normalizada, un plano mide ~1e7 (autovalores exactamente cero en
+        // las 3 direcciones no restringidas) y un cubo bien condicionado
+        // mide ~2.5 — separación de 6 órdenes de magnitud, sin necesidad de
+        // calibrar por escena como exigía el heurístico anterior.
+        let options = ICPOptions()
 
         do {
             _ = try aligner.align(source: shifted, target: plane, initial: Matrix4x4.identity, options: options)
             Issue.record("ICP sobre un plano debería ser rechazado por DegeneracyCheck")
         } catch {
-            guard let regErr = error as? RegistrationError, case .degenerate(let cond) = regErr else {
+            guard let regErr = error as? RegistrationError, case .degenerate(let cond, let weak) = regErr else {
                 Issue.record("Error inesperado: \(error)")
                 return
             }
-            #expect(cond > 0, "Número de condición debe ser positivo")
+            #expect(cond > 1e6, "Número de condición debe superar ampliamente el umbral")
+
+            // Resultado teórico clásico de degeneración de ICP sobre un
+            // único plano (normal ≈ Y): la traslación dentro del plano (X,
+            // Z) y la rotación alrededor de su propia normal (Y) no
+            // generan ningún residuo punto-a-plano — son las 3 direcciones
+            // sin restringir. La traslación fuera del plano (Y) y las
+            // rotaciones que lo inclinan (X, Z) sí generan residuo y quedan
+            // bien restringidas. Ver Gelfand et al. (3DIM 2003).
+            let weakAxes = Set(weak.map(\.axis))
+            #expect(
+                weakAxes == [.translationX, .translationZ, .rotationY],
+                "Direcciones débiles esperadas {translationX, translationZ, rotationY}, se obtuvo \(weakAxes)"
+            )
+            for w in weak {
+                #expect(w.sigma < 1e-3, "σ de una dirección degenerada real debería ser ~0, no \(w.sigma)")
+            }
         }
     }
 
@@ -297,13 +353,11 @@ struct DiffEngineTests {
         // La idea: sin máscara, la alineación intenta ajustar toda la pared,
         // absorbiendo el cambio del hueco. Con máscara, excluye la zona del hueco.
         // Verificar que DegeneracyCheck rechaza la pared plana (sin características).
-        // Umbral calibrado contra el heurístico actual de computeConditionNumber
-        // (mide ~33 para esta escena) — ver la nota extensa en
-        // "escena de un solo plano" más arriba y en fixes.md: el heurístico de
-        // dispersión geométrica no es un número de condición físicamente
-        // derivado, así que el umbral se ajusta por escena en vez de usar un
-        // valor universal.
-        let options = ICPOptions(degeneracyConditionThreshold: 25.0)
+        // Umbral por defecto (1e6): con el Hessiano punto-a-plano real y
+        // escala normalizada (fixes.md, "computeConditionNumber"), esta
+        // pared mide ~1e7 — igual que en "escena de un solo plano" más
+        // arriba, sin necesidad de un umbral ajustado por escena.
+        let options = ICPOptions()
         do {
             _ = try aligner.align(source: wallWithHole, target: wallBaseline,
                                    initial: Matrix4x4.identity, options: options)

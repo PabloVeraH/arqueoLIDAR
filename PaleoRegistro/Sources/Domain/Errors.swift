@@ -48,7 +48,7 @@ public enum GeoError: Error, Equatable, Sendable {
 }
 
 public enum RegistrationError: Error, Equatable, Sendable {
-    case degenerate(conditionNumber: Float)
+    case degenerate(conditionNumber: Float, weakDirections: [WeakDirection])
     case notConverged
     case insufficientCorrespondences(Int)
     case invalidInput(String)
