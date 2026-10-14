@@ -14,3 +14,9 @@ DerivedData/
 .env
 *.swp
 *~
+# Xcode (por usuario)
+xcuserdata/
+*.bak
+
+# Temporales locales
+.scratch/
