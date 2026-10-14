@@ -1,10 +1,9 @@
 import SwiftUI
-import SceneKit
 import Domain
 
 // ═══════════════════════════════════════════════════════════════════════════════
-// Flujo de terreno: lista de hallazgos → ficha del hallazgo → escanear (LiDAR +
-// GPS, se sella al guardar) → ver en 3D → exportar.
+// Flujo de terreno: lista de hallazgos → ficha del hallazgo → escanear
+// (CaptureView: LiDAR + GPS, se sella al guardar) → ver en 3D → exportar.
 // ═══════════════════════════════════════════════════════════════════════════════
 
 struct FindingsListView: View {
@@ -36,6 +35,7 @@ struct FindingsListView: View {
                 Button { showNew = true } label: { Label("Nuevo hallazgo", systemImage: "plus") }
             }
             .sheet(isPresented: $showNew, onDismiss: reload) { NewFindingView() }
+            .refreshable { reload() }
             .onAppear(perform: reload)
         }
     }
@@ -50,9 +50,9 @@ struct NewFindingView: View {
     @State private var permit = ""
     @State private var error: String?
     // El autor se recuerda entre hallazgos: suele ser la misma persona.
-    @AppStorage("author.name") private var name = ""
-    @AppStorage("author.role") private var role = ""
-    @AppStorage("author.institution") private var institution = ""
+    @AppStorage("authorName") private var name = ""
+    @AppStorage("authorRole") private var role = "Arqueólogo/a"
+    @AppStorage("authorInstitution") private var institution = ""
 
     private var isValid: Bool {
         ![title, expeditionCode, name, role, institution].contains { $0.trimmingCharacters(in: .whitespaces).isEmpty }
@@ -139,7 +139,7 @@ struct FindingDetailView: View {
                 Text("Cada escaneo se sella al guardarlo: queda en la cadena de custodia y no se puede modificar.")
             }
 
-            Section("Cadena de custodia") {
+            Section {
                 Button {
                     Task {
                         verifying = true
@@ -150,6 +150,9 @@ struct FindingDetailView: View {
                     Label(verifying ? "Verificando…" : "Verificar expediente", systemImage: "checkmark.shield")
                 }
                 .disabled(verifying || scans.isEmpty)
+                ShareLink(item: FieldStore.findingDir(finding)) {
+                    Label("Compartir expediente completo", systemImage: "folder")
+                }
                 if let verdict {
                     switch verdict {
                     case .valid:
@@ -162,11 +165,15 @@ struct FindingDetailView: View {
                         }
                     }
                 }
+            } header: {
+                Text("Cadena de custodia")
+            } footer: {
+                Text("Para verificarlo en una Mac sin la app: python3 tools/verify_chain.py <carpeta \(FieldStore.findingDir(finding).lastPathComponent)>")
             }
         }
         .navigationTitle(finding.title)
         .fullScreenCover(isPresented: $showCapture, onDismiss: reload) {
-            ScanCaptureView(finding: finding)
+            CaptureView(finding: finding)
         }
         .onAppear(perform: reload)
     }
@@ -177,109 +184,10 @@ struct FindingDetailView: View {
     }
 }
 
-struct ScanCaptureView: View {
-    let finding: Finding
-    @Environment(\.dismiss) private var dismiss
-    @State private var capture = LiDARCapture()
-    @State private var location = LocationRecorder()
-    @State private var purpose: ScanPurpose = .baseline
-    @State private var scanning = false
-    @State private var saving = false
-    @State private var error: String?
-
-    var body: some View {
-        NavigationStack {
-            Group {
-                if LiDARCapture.isSupported {
-                    ZStack(alignment: .bottom) {
-                        ARPreview(view: capture.arView).ignoresSafeArea()
-                        controls
-                    }
-                } else {
-                    ContentUnavailableView("Este dispositivo no tiene LiDAR", systemImage: "sensor",
-                                           description: Text("Se necesita un iPhone Pro (12 o posterior) o un iPad Pro."))
-                }
-            }
-            .toolbar {
-                ToolbarItem(placement: .cancellationAction) {
-                    Button("Cancelar") { cancel() }.disabled(saving)
-                }
-            }
-        }
-        .onDisappear { location.stop() }
-    }
-
-    private var controls: some View {
-        VStack(spacing: 12) {
-            if !scanning && !saving {
-                Picker("Propósito", selection: $purpose) {
-                    ForEach(ScanPurpose.allCases, id: \.self) { Text($0.label).tag($0) }
-                }
-                .pickerStyle(.menu)
-            }
-            Text(gpsStatus).font(.footnote)
-            if scanning {
-                Text("Recorre el hallazgo lentamente, a 0,5-3 m, hasta cubrirlo con la malla.")
-                    .font(.caption).multilineTextAlignment(.center)
-            }
-            if let error { Text(error).font(.caption).foregroundStyle(.red) }
-            if saving {
-                ProgressView("Guardando y sellando…")
-            } else {
-                Button(scanning ? "Terminar y guardar" : "Iniciar escaneo") {
-                    scanning ? finish() : start()
-                }
-                .buttonStyle(.borderedProminent)
-                .tint(scanning ? .red : .accentColor)
-            }
-        }
-        .padding()
-        .frame(maxWidth: .infinity)
-        .background(.regularMaterial)
-    }
-
-    private var gpsStatus: String {
-        if location.denied { return "GPS: permiso denegado (actívalo en Ajustes → Privacidad → Ubicación)" }
-        guard scanning || !location.fixes.isEmpty else { return "GPS: se registrará durante el escaneo" }
-        guard let best = location.bestAccuracy else { return "GPS: buscando señal…" }
-        return "GPS: \(location.fixes.count) lecturas · mejor ±\(best.formatted(.number.precision(.fractionLength(1)))) m"
-    }
-
-    private func start() {
-        error = nil
-        capture.start()
-        location.start()
-        scanning = true
-    }
-
-    private func finish() {
-        let parts = capture.stop()
-        location.stop()
-        scanning = false
-        saving = true
-        let fixes = location.fixes
-        Task {
-            do {
-                _ = try await FieldStore.saveScan(parts: parts, fixes: fixes, purpose: purpose, finding: finding)
-                dismiss()
-            } catch {
-                self.error = error.localizedDescription
-                saving = false
-            }
-        }
-    }
-
-    private func cancel() {
-        if scanning { _ = capture.stop() }
-        location.stop()
-        dismiss()
-    }
-}
-
 struct ScanDetailView: View {
     let entry: ScanEntry
     let finding: Finding
-    @State private var scene: SCNScene?
+    @State private var mesh: Mesh?
     @State private var stats = ""
     @State private var loadError: String?
     @State private var exported: [URL] = []
@@ -290,9 +198,8 @@ struct ScanDetailView: View {
         List {
             Section {
                 ZStack {
-                    if let scene {
-                        SceneView(scene: scene, pointOfView: scene.rootNode.childNode(withName: "camera", recursively: false),
-                                  options: [.allowsCameraControl, .autoenablesDefaultLighting])
+                    if let mesh {
+                        MeshViewer(mesh: mesh)
                     } else if let loadError {
                         Text(loadError).foregroundStyle(.red)
                     } else {
@@ -341,7 +248,7 @@ struct ScanDetailView: View {
         do {
             let mesh = try await Task.detached { try FieldStore.loadMesh(entry) }.value
             stats = "\(mesh.vertices.count.formatted()) vértices · \(mesh.triangleCount.formatted()) triángulos"
-            scene = MeshScene.make(mesh)
+            self.mesh = mesh
         } catch {
             loadError = "No se pudo leer la malla: \(error)"
         }
@@ -360,38 +267,5 @@ struct ScanDetailView: View {
             }
             exporting = false
         }
-    }
-}
-
-/// Convierte una malla de dominio en una escena SceneKit con cámara encuadrada.
-enum MeshScene {
-    static func make(_ mesh: Mesh) -> SCNScene {
-        var sources = [SCNGeometrySource(vertices: mesh.vertices.map { SCNVector3($0.x, $0.y, $0.z) })]
-        if let normals = mesh.normals {
-            sources.append(SCNGeometrySource(normals: normals.map { SCNVector3($0.x, $0.y, $0.z) }))
-        }
-        let geometry = SCNGeometry(sources: sources,
-                                   elements: [SCNGeometryElement(indices: mesh.indices, primitiveType: .triangles)])
-        let material = SCNMaterial()
-        material.diffuse.contents = UIColor(red: 0.80, green: 0.66, blue: 0.48, alpha: 1)
-        material.isDoubleSided = true
-        geometry.materials = [material]
-
-        let scene = SCNScene()
-        scene.background.contents = UIColor.systemGray6
-        let node = SCNNode(geometry: geometry)
-        scene.rootNode.addChildNode(node)
-
-        let (minB, maxB) = node.boundingBox
-        let center = SCNVector3((minB.x + maxB.x) / 2, (minB.y + maxB.y) / 2, (minB.z + maxB.z) / 2)
-        let size = max(maxB.x - minB.x, maxB.y - minB.y, maxB.z - minB.z, 0.1)
-        let camera = SCNNode()
-        camera.name = "camera"
-        camera.camera = SCNCamera()
-        camera.camera?.zNear = 0.01
-        camera.position = SCNVector3(center.x, center.y + size * 0.6, center.z + size * 1.4)
-        camera.look(at: center)
-        scene.rootNode.addChildNode(camera)
-        return scene
     }
 }

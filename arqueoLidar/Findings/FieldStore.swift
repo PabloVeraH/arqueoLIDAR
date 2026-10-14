@@ -22,6 +22,18 @@ nonisolated struct FieldError: LocalizedError {
     init(_ message: String) { errorDescription = message }
 }
 
+/// Resumen de un escaneo recién guardado y sellado (lo muestra SavedScanView).
+nonisolated struct SavedScan: Sendable, Identifiable {
+    let scanID: UUID
+    let title: String
+    let folder: URL
+    let meshURL: URL
+    let vertexCount: Int
+    let triangleCount: Int
+    let rootHash: String
+    var id: UUID { scanID }
+}
+
 nonisolated struct ScanEntry: Identifiable, Sendable {
     let scan: ScanSession
     let dir: URL
@@ -71,10 +83,10 @@ nonisolated enum FieldStore {
     /// Fusiona los trozos de malla de ARKit, guarda el escaneo con la serie GPS
     /// completa y sella el expediente (nuevo eslabón en seals/chain.jsonl).
     static func saveScan(parts: [MeshPart], fixes: [GeoFix], purpose: ScanPurpose,
-                         finding: Finding) async throws -> ScanSession {
+                         finding: Finding) async throws -> SavedScan {
         let merged = MeshMergerCore().merge(parts: parts)
         guard !merged.isEmpty else {
-            throw FieldError("El escaneo no capturó superficie. Recorre el hallazgo más lento y a menos de 3 m.")
+            throw FieldError("No hay malla para guardar. Recorre la zona con la cámara hasta ver el wireframe.")
         }
         let mesh = Mesh(vertices: merged.vertices, indices: merged.indices,
                         normals: MeshOps().computeVertexNormals(merged).map(vecNormalize))
@@ -100,7 +112,10 @@ nonisolated enum FieldStore {
                                                key: signingKey)
         try writer.appendSeal(seal, to: dir)
         try writer.writeVerifyDoc(to: dir, author: finding.author, rootHash: seal.rootHash)
-        return scan
+        return SavedScan(scanID: scan.scanID, title: finding.title, folder: dir,
+                         meshURL: scanDir.appendingPathComponent("mesh.ply"),
+                         vertexCount: mesh.vertices.count, triangleCount: mesh.triangleCount,
+                         rootHash: seal.rootHash)
     }
 
     static func loadMesh(_ entry: ScanEntry) throws -> Mesh {

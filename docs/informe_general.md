@@ -10,7 +10,7 @@ La app ya existe como proyecto de Xcode (`arqueoLidar.xcodeproj` y la carpeta `a
 
 - **Terreno**: el flujo de trabajo real.
   1. Se crea el expediente de un hallazgo con su nombre, código de expedición, responsable y permiso CMN.
-  2. Se escanea con la **cámara y el LiDAR**, viendo la malla 3D en vivo sobre la imagen, mientras el **GPS** registra todas sus lecturas.
+  2. Se escanea con la **cámara y el LiDAR**, viendo la malla 3D en vivo sobre la imagen, mientras el **GPS** registra todas sus lecturas. Un panel muestra si el seguimiento es bueno, la temperatura del teléfono y el espacio libre. Un botón "Medir ruido" indica cuánto tiembla la medición sobre una pared plana, en milímetros.
   3. Al guardar, el escaneo se **sella** automáticamente.
   4. El escaneo se puede **ver en 3D**: girar con un dedo y acercar con dos.
   5. Se puede **exportar** a PLY, STL, OBJ, LAS y GeoJSON y compartir los archivos.
