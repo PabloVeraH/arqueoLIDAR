@@ -1,7 +1,11 @@
 import Foundation
 import Domain
 import Persistence
+#if canImport(CryptoKit)
+import CryptoKit
+#else
 import Crypto
+#endif
 
 // ═══════════════════════════════════════════════════════════════════════════════
 // F10 — Hasher. SHA-256 en streaming por archivo.

@@ -1,7 +1,11 @@
 import Foundation
 import Domain
 import Persistence
+#if canImport(CryptoKit)
+import CryptoKit
+#else
 import Crypto
+#endif
 
 // ═══════════════════════════════════════════════════════════════════════════════
 // F10 — SealSigner. Firma P-256 con clave de software (tests/CI) o

@@ -20,13 +20,14 @@ import Mesh
 // ═══════════════════════════════════════════════════════════════════════════════
 
 public struct BundleWriter: Sendable {
-    private let fileManager: FileManager
+    // En plataformas Apple FileManager no es Sendable, así que no se guarda como
+    // propiedad: se usa siempre FileManager.default (thread-safe para estas operaciones).
+    private var fileManager: FileManager { .default }
     private let baseURL: URL
     private let jsonEncoder: CanonicalJSONEncoder
 
-    public init(baseURL: URL, fileManager: FileManager = .default) {
+    public init(baseURL: URL) {
         self.baseURL = baseURL.appendingPathComponent("Findings", isDirectory: true)
-        self.fileManager = fileManager
         self.jsonEncoder = CanonicalJSONEncoder()
     }
 

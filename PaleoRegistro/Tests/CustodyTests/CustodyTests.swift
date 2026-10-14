@@ -2,7 +2,11 @@ import Testing
 import Foundation
 import Domain
 import Persistence
+#if canImport(CryptoKit)
+import CryptoKit
+#else
 import Crypto
+#endif
 @testable import Custody
 
 // ═══════════════════════════════════════════════════════════════════════════════

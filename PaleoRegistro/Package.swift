@@ -1,10 +1,26 @@
 // swift-tools-version: 6.0
 import PackageDescription
 
-let crypto = Target.Dependency.product(name: "Crypto", package: "swift-crypto")
+// En plataformas Apple se usa CryptoKit del sistema (misma API), así Xcode no
+// necesita descargar swift-crypto. En Linux (toolchain de tests) se usa swift-crypto.
+#if os(Linux) || os(Windows)
+let cryptoPackages: [Package.Dependency] = [
+    .package(url: "https://github.com/apple/swift-crypto.git", from: "3.0.0")
+]
+let cryptoDeps: [Target.Dependency] = [.product(name: "Crypto", package: "swift-crypto")]
+#else
+let cryptoPackages: [Package.Dependency] = []
+let cryptoDeps: [Target.Dependency] = []
+#endif
 
 let package = Package(
     name: "PaleoRegistro",
+    // Sin plataformas mínimas, Xcode compila contra iOS 12 / macOS 10.13, donde
+    // CryptoKit (P256, SHA256), `actor` y typed throws no están disponibles.
+    platforms: [
+        .iOS(.v18),
+        .macOS(.v15),
+    ],
     products: [
         .library(name: "PaleoDomain", targets: ["Domain"]),
         .library(name: "PaleoGeometry", targets: ["Geometry"]),
@@ -18,9 +34,7 @@ let package = Package(
         .library(name: "PaleoPersistence", targets: ["Persistence"]),
         .library(name: "PaleoExport", targets: ["Export"]),
     ],
-    dependencies: [
-        .package(url: "https://github.com/apple/swift-crypto.git", from: "3.0.0")
-    ],
+    dependencies: cryptoPackages,
     targets: [
         // F1 — tipos puros, cero imports de framework.
         .target(name: "Domain"),
@@ -47,7 +61,7 @@ let package = Package(
         .target(name: "Registration", dependencies: ["Domain", "Mesh", "Geometry"]),
 
         // F10
-        .target(name: "Custody", dependencies: ["Domain", "Persistence", crypto]),
+        .target(name: "Custody", dependencies: ["Domain", "Persistence"] + cryptoDeps),
 
         // F9 — depende de Mesh para poder leer de vuelta el PLY que ella
         // misma escribe (FindingStore.loadMesh, vía PLYCodec) sin crear una
