@@ -4,7 +4,10 @@ import SwiftUI
 struct ArqueoLidarApp: App {
     var body: some Scene {
         WindowGroup {
-            ContentView()
+            TabView {
+                Tab("Terreno", systemImage: "camera.metering.matrix") { FindingsListView() }
+                Tab("Diagnóstico", systemImage: "checklist") { ContentView() }
+            }
         }
     }
 }

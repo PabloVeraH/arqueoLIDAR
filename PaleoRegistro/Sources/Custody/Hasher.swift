@@ -59,12 +59,17 @@ public struct Hasher: Sendable {
         }
 
         var digests: [FileDigest] = []
+        let basePath = url.resolvingSymlinksInPath().path + "/"
 
         for case let fileURL as URL in enumerator {
             guard let isRegular = try? fileURL.resourceValues(forKeys: [.isRegularFileKey]).isRegularFile,
                   isRegular else { continue }
 
-            let relPath = fileURL.path.replacingOccurrences(of: url.path + "/", with: "")
+            // Ambos lados con symlinks resueltos: en iOS el contenedor de la app
+            // puede verse como /var/… o /private/var/… según de dónde venga la
+            // URL, y sin normalizar la ruta "relativa" saldría absoluta.
+            let relPath = fileURL.resolvingSymlinksInPath().path
+                .replacingOccurrences(of: basePath, with: "")
 
             // Excluir sellos y marcadores generados tras el sellado.
             if relPath.hasPrefix("seals/") { continue }
