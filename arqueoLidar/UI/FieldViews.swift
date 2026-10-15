@@ -2,69 +2,171 @@ import SwiftUI
 import Domain
 
 // ═══════════════════════════════════════════════════════════════════════════════
-// Flujo de terreno: lista de hallazgos → ficha del hallazgo → escanear
+// Flujo de terreno: sitios → hallazgos del sitio → ficha del hallazgo → escanear
 // (CaptureView: LiDAR + GPS, se sella al guardar) → ver en 3D → exportar.
 // ═══════════════════════════════════════════════════════════════════════════════
 
+struct SitesListView: View {
+    @State private var sites: [Site] = []
+    @State private var counts: [UUID: Int] = [:]
+    @State private var orphans = 0
+    @State private var showNew = false
+
+    var body: some View {
+        NavigationStack {
+            List {
+                ForEach(sites, id: \.siteID) { site in
+                    NavigationLink {
+                        FindingsListView(site: site)
+                    } label: {
+                        VStack(alignment: .leading, spacing: 2) {
+                            Text(site.name)
+                            Text("\(site.code) · \(counts[site.siteID] ?? 0) hallazgos")
+                                .font(.caption)
+                                .foregroundStyle(.secondary)
+                        }
+                    }
+                }
+                if orphans > 0 {
+                    NavigationLink {
+                        FindingsListView(site: nil)
+                    } label: {
+                        Label("Hallazgos sin sitio (\(orphans))", systemImage: "questionmark.folder")
+                    }
+                }
+            }
+            .overlay {
+                if sites.isEmpty && orphans == 0 {
+                    ContentUnavailableView("Sin sitios", systemImage: "map",
+                                           description: Text("Toca + para registrar el sitio o yacimiento donde trabajas."))
+                }
+            }
+            .navigationTitle("Sitios")
+            .toolbar {
+                Button { showNew = true } label: { Label("Nuevo sitio", systemImage: "plus") }
+            }
+            .sheet(isPresented: $showNew, onDismiss: reload) { NewSiteView() }
+            .refreshable { reload() }
+            .onAppear(perform: reload)
+        }
+    }
+
+    private func reload() {
+        sites = FieldStore.sites()
+        let known = Set(sites.map(\.siteID))
+        let all = FieldStore.findings()
+        counts = Dictionary(grouping: all, by: \.siteID).mapValues(\.count)
+        orphans = all.filter { !known.contains($0.siteID) }.count
+    }
+}
+
+struct NewSiteView: View {
+    @Environment(\.dismiss) private var dismiss
+    @State private var name = ""
+    @State private var code = ""
+    @State private var error: String?
+
+    private var isValid: Bool {
+        ![name, code].contains { $0.trimmingCharacters(in: .whitespaces).isEmpty }
+    }
+
+    var body: some View {
+        NavigationStack {
+            Form {
+                Section {
+                    TextField("Nombre (ej. Quebrada de Los Ratones)", text: $name)
+                    TextField("Código del sitio (ej. QLR-01)", text: $code)
+                } footer: {
+                    Text("El sitio agrupa los hallazgos. Cada expediente guarda una copia de esta ficha.")
+                }
+                if let error {
+                    Section { Text(error).foregroundStyle(.red) }
+                }
+            }
+            .navigationTitle("Nuevo sitio")
+            .navigationBarTitleDisplayMode(.inline)
+            .toolbar {
+                ToolbarItem(placement: .cancellationAction) { Button("Cancelar") { dismiss() } }
+                ToolbarItem(placement: .confirmationAction) { Button("Crear", action: create).disabled(!isValid) }
+            }
+        }
+    }
+
+    private func create() {
+        let site = Site(name: name.trimmingCharacters(in: .whitespaces),
+                        code: code.trimmingCharacters(in: .whitespaces))
+        do {
+            try FieldStore.createSite(site)
+            dismiss()
+        } catch {
+            self.error = "No se pudo crear el sitio: \(error)"
+        }
+    }
+}
+
 struct FindingsListView: View {
+    /// `nil` = hallazgos creados antes de que existieran los sitios.
+    let site: Site?
     @State private var findings: [Finding] = []
     @State private var showNew = false
     @State private var pendingDelete: Finding?
     @State private var deleteError: String?
 
     var body: some View {
-        NavigationStack {
-            List(findings, id: \.findingID) { finding in
-                NavigationLink {
-                    FindingDetailView(finding: finding)
+        List(findings, id: \.findingID) { finding in
+            NavigationLink {
+                FindingDetailView(finding: finding)
+            } label: {
+                VStack(alignment: .leading, spacing: 2) {
+                    Text(finding.title)
+                    Text("\(finding.expeditionCode) · \(finding.createdAt.formatted(date: .abbreviated, time: .shortened))")
+                        .font(.caption)
+                        .foregroundStyle(.secondary)
+                }
+            }
+            .swipeActions {
+                Button(role: .destructive) {
+                    pendingDelete = finding
                 } label: {
-                    VStack(alignment: .leading, spacing: 2) {
-                        Text(finding.title)
-                        Text("\(finding.expeditionCode) · \(finding.createdAt.formatted(date: .abbreviated, time: .shortened))")
-                            .font(.caption)
-                            .foregroundStyle(.secondary)
-                    }
-                }
-                .swipeActions {
-                    Button(role: .destructive) {
-                        pendingDelete = finding
-                    } label: {
-                        Label("Eliminar", systemImage: "trash")
-                    }
+                    Label("Eliminar", systemImage: "trash")
                 }
             }
-            .confirmationDialog(
-                "¿Eliminar «\(pendingDelete?.title ?? "")»?",
-                isPresented: Binding(get: { pendingDelete != nil }, set: { if !$0 { pendingDelete = nil } }),
-                titleVisibility: .visible,
-                presenting: pendingDelete
-            ) { finding in
-                Button("Eliminar expediente", role: .destructive) { delete(finding) }
-            } message: { _ in
-                Text("Solo se pueden eliminar expedientes sin escaneos o que no pasan la verificación de custodia. Los expedientes íntegros son evidencia y quedan protegidos. No se puede deshacer.")
+        }
+        .confirmationDialog(
+            "¿Eliminar «\(pendingDelete?.title ?? "")»?",
+            isPresented: Binding(get: { pendingDelete != nil }, set: { if !$0 { pendingDelete = nil } }),
+            titleVisibility: .visible,
+            presenting: pendingDelete
+        ) { finding in
+            Button("Eliminar expediente", role: .destructive) { delete(finding) }
+        } message: { _ in
+            Text("Solo se pueden eliminar expedientes sin escaneos o que no pasan la verificación de custodia. Los expedientes íntegros son evidencia y quedan protegidos. No se puede deshacer.")
+        }
+        .alert("No se eliminó", isPresented: Binding(get: { deleteError != nil }, set: { if !$0 { deleteError = nil } })) {
+            Button("OK", role: .cancel) {}
+        } message: {
+            Text(deleteError ?? "")
+        }
+        .overlay {
+            if findings.isEmpty {
+                ContentUnavailableView("Sin hallazgos", systemImage: "fossil.shell",
+                                       description: Text("Toca + para crear el expediente de un hallazgo."))
             }
-            .alert("No se eliminó", isPresented: Binding(get: { deleteError != nil }, set: { if !$0 { deleteError = nil } })) {
-                Button("OK", role: .cancel) {}
-            } message: {
-                Text(deleteError ?? "")
-            }
-            .overlay {
-                if findings.isEmpty {
-                    ContentUnavailableView("Sin hallazgos", systemImage: "fossil.shell",
-                                           description: Text("Toca + para crear el expediente de un hallazgo."))
-                }
-            }
-            .navigationTitle("Hallazgos")
-            .toolbar {
+        }
+        .navigationTitle(site?.name ?? "Sin sitio")
+        .toolbar {
+            if site != nil {
                 Button { showNew = true } label: { Label("Nuevo hallazgo", systemImage: "plus") }
             }
-            .sheet(isPresented: $showNew, onDismiss: reload) { NewFindingView() }
-            .refreshable { reload() }
-            .onAppear(perform: reload)
         }
+        .sheet(isPresented: $showNew, onDismiss: reload) {
+            if let site { NewFindingView(site: site) }
+        }
+        .refreshable { reload() }
+        .onAppear(perform: reload)
     }
 
-    private func reload() { findings = FieldStore.findings() }
+    private func reload() { findings = FieldStore.findings(in: site) }
 
     private func delete(_ finding: Finding) {
         Task {
@@ -79,6 +181,7 @@ struct FindingsListView: View {
 }
 
 struct NewFindingView: View {
+    let site: Site
     @Environment(\.dismiss) private var dismiss
     @State private var title = ""
     @State private var expeditionCode = ""
@@ -97,6 +200,7 @@ struct NewFindingView: View {
         NavigationStack {
             Form {
                 Section("Hallazgo") {
+                    LabeledContent("Sitio", value: "\(site.name) (\(site.code))")
                     TextField("Nombre (ej. Fémur en zanja norte)", text: $title)
                     TextField("Código de expedición", text: $expeditionCode)
                 }
@@ -123,10 +227,10 @@ struct NewFindingView: View {
         let permitNumber = permit.trimmingCharacters(in: .whitespaces)
         let author = AuthorIdentity(name: name, role: role, institution: institution,
                                     cmnPermitNumber: permitNumber.isEmpty ? nil : permitNumber)
-        let finding = Finding(siteID: UUID(), title: title, expeditionCode: expeditionCode, author: author,
+        let finding = Finding(siteID: site.siteID, title: title, expeditionCode: expeditionCode, author: author,
                               permit: permitNumber.isEmpty ? nil : CMNPermit(number: permitNumber, institution: institution))
         do {
-            try FieldStore.createFinding(finding)
+            try FieldStore.createFinding(finding, site: site)
             dismiss()
         } catch {
             self.error = "No se pudo crear el expediente: \(error)"

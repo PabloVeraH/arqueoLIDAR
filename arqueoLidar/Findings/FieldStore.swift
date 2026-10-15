@@ -51,6 +51,24 @@ nonisolated enum FieldStore {
     // (§2.C.6) pide Secure Enclave + Face ID para no-repudio real.
     static let signingKey = SoftwareSigningKey()
 
+    // MARK: - Sitios
+
+    /// Documents/Sites/SIT-xxxxxxxx.json. Los sitios no se sellan: son la carpeta
+    /// que agrupa hallazgos. Cada expediente lleva su propia copia (`site.json`).
+    static let sitesDir = documents.appendingPathComponent("Sites")
+
+    static func sites() -> [Site] {
+        let files = (try? FileManager.default.contentsOfDirectory(at: sitesDir, includingPropertiesForKeys: nil)) ?? []
+        return files.compactMap { load(Site.self, from: $0) }
+            .sorted { $0.name.localizedStandardCompare($1.name) == .orderedAscending }
+    }
+
+    static func createSite(_ site: Site) throws {
+        try FileManager.default.createDirectory(at: sitesDir, withIntermediateDirectories: true)
+        try CanonicalJSONEncoder().encode(site)
+            .write(to: sitesDir.appendingPathComponent("SIT-\(site.siteID.uuidString.prefix(8)).json"), options: .atomic)
+    }
+
     // MARK: - Hallazgos
 
     static func findings() -> [Finding] {
@@ -60,8 +78,20 @@ nonisolated enum FieldStore {
             .sorted { $0.createdAt > $1.createdAt }
     }
 
-    static func createFinding(_ finding: Finding) throws {
-        _ = try writer.createFinding(finding)
+    /// Hallazgos de un sitio; con `nil`, los que no pertenecen a ningún sitio
+    /// registrado (los creados antes de que existieran los sitios).
+    static func findings(in site: Site?) -> [Finding] {
+        let all = findings()
+        if let site { return all.filter { $0.siteID == site.siteID } }
+        let known = Set(sites().map(\.siteID))
+        return all.filter { !known.contains($0.siteID) }
+    }
+
+    /// Crea el expediente con una copia de la ficha del sitio dentro: queda en el
+    /// manifiesto del primer sello, así el expediente compartido dice dónde se hizo.
+    static func createFinding(_ finding: Finding, site: Site) throws {
+        let dir = try writer.createFinding(finding)
+        try CanonicalJSONEncoder().encode(site).write(to: dir.appendingPathComponent("site.json"), options: .atomic)
     }
 
     static func findingDir(_ finding: Finding) -> URL {

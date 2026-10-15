@@ -58,3 +58,4 @@ advertencias** de código en Xcode 27 beta (destino iPhone).
   rotas del bug ya corregido); se pueden borrar deslizando la fila en Terreno → Hallazgos.
 - Eliminar: un expediente con sellos inválidos o sin escaneos debe borrarse tras
   confirmar; uno íntegro (p. ej. FND-D820CF5D) debe mostrar "No se eliminó" y seguir en la lista.
+- Sitios: crear un sitio, crear un hallazgo dentro, escanear y verificar → debe dar Íntegro (ahora el expediente incluye `site.json`). Los hallazgos anteriores deben verse en "Hallazgos sin sitio".
