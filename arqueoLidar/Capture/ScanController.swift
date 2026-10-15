@@ -113,10 +113,12 @@ final class ScanController {
         return frame.anchors.compactMap { $0 as? ARMeshAnchor }.map(MeshAnchorReader.part(from:))
     }
 
-    /// Prueba de ruido del sensor: ajusta un plano a los vértices de la malla
-    /// cercanos al punto que marca la mira y reporta la desviación estándar de
-    /// los residuos. Se registra el número; no se compara contra ninguna expectativa.
-    func measureSurfaceNoise(radius: Float = 0.3) {
+    /// Prueba de ruido del sensor (criterio de F3): toma los vértices de la
+    /// malla cercanos al punto que marca la mira, ajusta un plano con RANSAC y
+    /// reporta la desviación estándar de los residuos de los puntos que SÍ están
+    /// en ese plano. Si una parte importante de los puntos queda fuera, la zona
+    /// no es plana (esquina, objetos) y el número no representa ruido del sensor.
+    func measureSurfaceNoise(radius: Float = 0.2) {
         let center = CGPoint(x: sceneView.bounds.midX, y: sceneView.bounds.midY)
         guard let frame = sceneView.session.currentFrame,
               let query = sceneView.raycastQuery(from: center, allowing: .estimatedPlane, alignment: .any),
@@ -134,19 +136,28 @@ final class ScanController {
                 points.append(p)
             }
         }
-        guard points.count >= 20 else {
+        guard points.count >= 30 else {
             noiseResult = "Solo \(points.count) vértices cerca de la mira. Escanea más esa zona y vuelve a medir."
             return
         }
         do {
-            let plane = try LeastSquaresPlaneFitter().fit(points: points, normals: nil, options: PlaneFitOptions())
-            let residuals = points.map { Double(simd_dot($0 - plane.point, plane.normal)) }
+            let inlierDistance: Float = 0.015
+            let options = PlaneFitOptions(maxIterations: 1000, inlierDistance: inlierDistance,
+                                          minInliers: max(20, points.count / 3))
+            let plane = try RANSACPlaneFitter().fit(points: points, normals: nil, options: options)
+            let inliers = points.filter { abs(simd_dot($0 - plane.point, plane.normal)) <= inlierDistance }
+            let residuals = inliers.map { Double(simd_dot($0 - plane.point, plane.normal)) }
             let mean = residuals.reduce(0, +) / Double(residuals.count)
-            let variance = residuals.reduce(0) { $0 + ($1 - mean) * ($1 - mean) } / Double(residuals.count)
-            noiseResult = String(format: "Superficie a %.2f m · σ = %.1f mm · %d vértices en %.0f cm de radio",
-                                 distance, variance.squareRoot() * 1000, points.count, radius * 100)
+            let sigma = (residuals.reduce(0) { $0 + ($1 - mean) * ($1 - mean) } / Double(residuals.count)).squareRoot()
+            let fraction = Double(inliers.count) / Double(points.count)
+            var text = String(format: "Superficie a %.2f m · σ = %.1f mm · %d de %d vértices en el plano (%.0f%%), radio %.0f cm",
+                              distance, sigma * 1000, inliers.count, points.count, fraction * 100, radius * 100)
+            if fraction < 0.7 {
+                text += "\n⚠︎ La zona no es plana (esquina u objetos): apunta a una pared despejada para medir el ruido."
+            }
+            noiseResult = text
         } catch {
-            noiseResult = "No se pudo ajustar el plano: \(error)"
+            noiseResult = "No se encontró un plano bajo la mira. Apunta a una pared despejada. (\(error))"
         }
     }
 }

@@ -54,23 +54,32 @@ public struct Hasher: Sendable {
     /// `.sealed` y `VERIFY.txt` (generados tras el sellado, romperían el hash).
     public func buildManifest(directoryAt url: URL) throws(CustodyError) -> [FileDigest] {
         let fm = FileManager.default
-        guard let enumerator = fm.enumerator(at: url, includingPropertiesForKeys: [.isRegularFileKey, .fileSizeKey]) else {
+        // Se enumera por ruta (`enumerator(atPath:)`), que entrega rutas ya
+        // relativas a la raíz. Antes se derivaban con un reemplazo de texto
+        // sobre `fileURL.path`, lo que fallaba cuando la raíz y los archivos
+        // enumerados usaban formas distintas de la misma ruta (en iOS,
+        // `/var/mobile/…` vs `/private/var/mobile/…`): el manifiesto quedaba
+        // con rutas como "/privatefinding.json" y la verificación fallaba.
+        guard let enumerator = fm.enumerator(atPath: url.path) else {
             throw .bundleNotFound
         }
 
         var digests: [FileDigest] = []
 
-        for case let fileURL as URL in enumerator {
-            guard let isRegular = try? fileURL.resourceValues(forKeys: [.isRegularFileKey]).isRegularFile,
-                  isRegular else { continue }
-
-            let relPath = fileURL.path.replacingOccurrences(of: url.path + "/", with: "")
-
+        while let relPath = enumerator.nextObject() as? String {
             // Excluir sellos y marcadores generados tras el sellado.
+            if relPath == "seals" {
+                enumerator.skipDescendants()
+                continue
+            }
             if relPath.hasPrefix("seals/") { continue }
             if relPath == ".sealed" || relPath == "VERIFY.txt" { continue }
 
-            let fileSize = (try? fileURL.resourceValues(forKeys: [.fileSizeKey]).fileSize).map(Int64.init) ?? 0
+            let fileURL = url.appendingPathComponent(relPath)
+            guard let values = try? fileURL.resourceValues(forKeys: [.isRegularFileKey, .fileSizeKey]),
+                  values.isRegularFile == true else { continue }
+
+            let fileSize = values.fileSize.map(Int64.init) ?? 0
 
             let sha = try hash(fileAt: fileURL)
 

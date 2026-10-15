@@ -106,6 +106,12 @@ actor FindingService {
         }
     }
 
+    /// Elimina la carpeta completa del expediente (acción explícita del usuario).
+    func delete(findingID: UUID) async throws {
+        try FileManager.default.removeItem(at: writer.findingURL(findingID))
+        try await store.rebuildIndex()
+    }
+
     private func ensureIndex() async throws {
         guard !indexLoaded else { return }
         try await store.rebuildIndex()

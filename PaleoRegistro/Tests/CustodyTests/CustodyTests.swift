@@ -76,6 +76,28 @@ struct HasherTests {
         #expect(manifest1[1].relativePath == "z.txt")
     }
 
+    @Test("Manifiesto con rutas relativas aunque la raíz se acceda por un enlace simbólico")
+    func manifestRelativeThroughSymlink() throws {
+        // Reproduce el caso de iOS: Documentos se entrega como /var/mobile/…,
+        // pero /var es un enlace a /private/var.
+        let fm = FileManager.default
+        let realDir = tempBundleDir()
+        defer { try? fm.removeItem(at: realDir) }
+        try fm.createDirectory(at: realDir.appendingPathComponent("scans/s1"), withIntermediateDirectories: true)
+        try fm.createDirectory(at: realDir.appendingPathComponent("seals"), withIntermediateDirectories: true)
+        try "a".data(using: .utf8)!.write(to: realDir.appendingPathComponent("finding.json"))
+        try "b".data(using: .utf8)!.write(to: realDir.appendingPathComponent("scans/s1/mesh.ply"))
+        try "c".data(using: .utf8)!.write(to: realDir.appendingPathComponent("seals/chain.jsonl"))
+        try "d".data(using: .utf8)!.write(to: realDir.appendingPathComponent("VERIFY.txt"))
+
+        let link = realDir.deletingLastPathComponent().appendingPathComponent("link-\(UUID().uuidString.prefix(8))")
+        try fm.createSymbolicLink(at: link, withDestinationURL: realDir)
+        defer { try? fm.removeItem(at: link) }
+
+        let manifest = try Hasher().buildManifest(directoryAt: link)
+        #expect(manifest.map(\.relativePath) == ["finding.json", "scans/s1/mesh.ply"])
+    }
+
     @Test("Root hash es determinista para el mismo contenido")
     func rootHashDeterministic() throws {
         let dir = tempBundleDir()

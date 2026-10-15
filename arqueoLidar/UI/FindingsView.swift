@@ -9,6 +9,7 @@ struct FindingsView: View {
     @State private var items: [FindingItem] = []
     @State private var loaded = false
     @State private var errorText: String?
+    @State private var pendingDelete: FindingItem?
 
     var body: some View {
         List {
@@ -26,7 +27,35 @@ struct FindingsView: View {
                             .foregroundStyle(.secondary)
                     }
                 }
+                .swipeActions {
+                    Button(role: .destructive) {
+                        pendingDelete = item
+                    } label: {
+                        Label("Eliminar", systemImage: "trash")
+                    }
+                }
             }
+        }
+        .confirmationDialog(
+            "¿Eliminar el expediente \(pendingDelete?.folder.lastPathComponent ?? "")?",
+            isPresented: Binding(get: { pendingDelete != nil }, set: { if !$0 { pendingDelete = nil } }),
+            titleVisibility: .visible
+        ) {
+            Button("Eliminar expediente", role: .destructive) {
+                if let item = pendingDelete {
+                    Task {
+                        do {
+                            try await FindingService.shared.delete(findingID: item.summary.findingID)
+                        } catch {
+                            errorText = "No se pudo eliminar: \(error.localizedDescription)"
+                        }
+                        await load()
+                    }
+                }
+                pendingDelete = nil
+            }
+        } message: {
+            Text("Se borran la malla, los sellos y todos sus archivos del iPhone. No se puede deshacer.")
         }
         .overlay {
             if loaded && items.isEmpty && errorText == nil {
