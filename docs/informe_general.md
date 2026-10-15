@@ -44,13 +44,13 @@ Supongamos que una retroexcavadora encuentra un hueso grande en una obra:
 | 9. Meses después se vuelve a escanear y se compara | **Registration** |
 | 10. Se exportan archivos para el informe, el museo o la impresión 3D | **Export** |
 
-Todos los módulos se apoyan en uno más: **Domain**, el vocabulario común.
+Todos los módulos se apoyan en uno más: la **Estructura de Trabajo** (en el código se llama `Domain`), el vocabulario común.
 
 ---
 
 ## Los 11 módulos, uno por uno
 
-### 1. Domain: el vocabulario común
+### 1. Estructura de Trabajo (`Domain` en el código): el vocabulario común
 
 **Qué es:** el diccionario de la app. Define qué es un *Yacimiento*, un *Hallazgo*, una *Sesión de escaneo*, un *Espécimen*, una *Medición* y un *Sello*.
 
