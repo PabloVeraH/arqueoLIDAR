@@ -26,7 +26,7 @@ nonisolated struct SelfCheck: Sendable, Identifiable {
 }
 
 nonisolated enum PaleoModule: String, CaseIterable, Sendable, Identifiable {
-    case domain = "Domain"
+    case domain = "Estructura de Trabajo"  // módulo Domain
     case geometry = "Geometry"
     case mesh = "Mesh"
     case volume = "Volume"
@@ -42,7 +42,7 @@ nonisolated enum PaleoModule: String, CaseIterable, Sendable, Identifiable {
 
     var summary: String {
         switch self {
-        case .domain: "Tipos base, validaciones y matemática"
+        case .domain: "Fichas de sitio, hallazgo y escaneo; validaciones y matemática"
         case .geometry: "Ajuste de planos (RANSAC) y cajas orientadas"
         case .mesh: "Mallas: cierre, componentes, codec PLY"
         case .volume: "Integración de volúmenes"
