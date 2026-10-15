@@ -59,3 +59,5 @@ advertencias** de código en Xcode 27 beta (destino iPhone).
 - Eliminar: un expediente con sellos inválidos o sin escaneos debe borrarse tras
   confirmar; uno íntegro (p. ej. FND-D820CF5D) debe mostrar "No se eliminó" y seguir en la lista.
 - Sitios: crear un sitio, crear un hallazgo dentro, escanear y verificar → debe dar Íntegro (ahora el expediente incluye `site.json`). Los hallazgos anteriores deben verse en "Hallazgos sin sitio".
+- Sitios con GPS: crear un sitio y "Tomar ubicación con GPS" al aire libre → debe mostrar latitud, longitud y precisión; "sin ubicación" desaparece de la fila. Editar nombre/código y volver a tomar la ubicación.
+- Eliminar sitio: uno sin hallazgos se borra tras confirmar; uno con hallazgos debe mostrar "No se eliminó".

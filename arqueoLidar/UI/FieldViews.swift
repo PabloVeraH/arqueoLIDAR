@@ -11,6 +11,9 @@ struct SitesListView: View {
     @State private var counts: [UUID: Int] = [:]
     @State private var orphans = 0
     @State private var showNew = false
+    @State private var editing: Site?
+    @State private var pendingDelete: Site?
+    @State private var deleteError: String?
 
     var body: some View {
         NavigationStack {
@@ -21,10 +24,23 @@ struct SitesListView: View {
                     } label: {
                         VStack(alignment: .leading, spacing: 2) {
                             Text(site.name)
-                            Text("\(site.code) · \(counts[site.siteID] ?? 0) hallazgos")
+                            Text("\(site.code) · \(counts[site.siteID] ?? 0) hallazgos\(site.location == nil ? " · sin ubicación" : "")")
                                 .font(.caption)
                                 .foregroundStyle(.secondary)
                         }
+                    }
+                    .swipeActions {
+                        Button(role: .destructive) {
+                            pendingDelete = site
+                        } label: {
+                            Label("Eliminar", systemImage: "trash")
+                        }
+                        Button {
+                            editing = site
+                        } label: {
+                            Label("Editar", systemImage: "pencil")
+                        }
+                        .tint(.blue)
                     }
                 }
                 if orphans > 0 {
@@ -34,6 +50,21 @@ struct SitesListView: View {
                         Label("Hallazgos sin sitio (\(orphans))", systemImage: "questionmark.folder")
                     }
                 }
+            }
+            .confirmationDialog(
+                "¿Eliminar el sitio «\(pendingDelete?.name ?? "")»?",
+                isPresented: Binding(get: { pendingDelete != nil }, set: { if !$0 { pendingDelete = nil } }),
+                titleVisibility: .visible,
+                presenting: pendingDelete
+            ) { site in
+                Button("Eliminar sitio", role: .destructive) { delete(site) }
+            } message: { _ in
+                Text("Solo se pueden eliminar sitios sin hallazgos. No se puede deshacer.")
+            }
+            .alert("No se eliminó", isPresented: Binding(get: { deleteError != nil }, set: { if !$0 { deleteError = nil } })) {
+                Button("OK", role: .cancel) {}
+            } message: {
+                Text(deleteError ?? "")
             }
             .overlay {
                 if sites.isEmpty && orphans == 0 {
@@ -45,7 +76,10 @@ struct SitesListView: View {
             .toolbar {
                 Button { showNew = true } label: { Label("Nuevo sitio", systemImage: "plus") }
             }
-            .sheet(isPresented: $showNew, onDismiss: reload) { NewSiteView() }
+            .sheet(isPresented: $showNew, onDismiss: reload) { SiteFormView(site: nil) }
+            .sheet(isPresented: Binding(get: { editing != nil }, set: { if !$0 { editing = nil } }), onDismiss: reload) {
+                if let editing { SiteFormView(site: editing) }
+            }
             .refreshable { reload() }
             .onAppear(perform: reload)
         }
@@ -58,13 +92,34 @@ struct SitesListView: View {
         counts = Dictionary(grouping: all, by: \.siteID).mapValues(\.count)
         orphans = all.filter { !known.contains($0.siteID) }.count
     }
+
+    private func delete(_ site: Site) {
+        do {
+            try FieldStore.deleteSite(site)
+        } catch {
+            deleteError = error.localizedDescription
+        }
+        reload()
+    }
 }
 
-struct NewSiteView: View {
+/// Alta (`site == nil`) o edición de la ficha del sitio, con su punto GPS.
+struct SiteFormView: View {
+    let site: Site?
     @Environment(\.dismiss) private var dismiss
-    @State private var name = ""
-    @State private var code = ""
+    @State private var name: String
+    @State private var code: String
+    @State private var location: GeoFix?
+    @State private var gps = LocationRecorder()
+    @State private var measuring = false
     @State private var error: String?
+
+    init(site: Site?) {
+        self.site = site
+        _name = State(initialValue: site?.name ?? "")
+        _code = State(initialValue: site?.code ?? "")
+        _location = State(initialValue: site?.location)
+    }
 
     private var isValid: Bool {
         ![name, code].contains { $0.trimmingCharacters(in: .whitespaces).isEmpty }
@@ -77,29 +132,72 @@ struct NewSiteView: View {
                     TextField("Nombre (ej. Quebrada de Los Ratones)", text: $name)
                     TextField("Código del sitio (ej. QLR-01)", text: $code)
                 } footer: {
-                    Text("El sitio agrupa los hallazgos. Cada expediente guarda una copia de esta ficha.")
+                    Text(site == nil
+                         ? "El sitio agrupa los hallazgos. Cada expediente guarda una copia de esta ficha."
+                         : "Los expedientes ya creados conservan la ficha tal como era al crearlos.")
                 }
+
+                Section {
+                    if let location {
+                        LabeledContent("Latitud", value: location.latitude.formatted(.number.precision(.fractionLength(6))))
+                        LabeledContent("Longitud", value: location.longitude.formatted(.number.precision(.fractionLength(6))))
+                        LabeledContent("Altura elipsoidal", value: "\(location.altitude.formatted(.number.precision(.fractionLength(1)))) m")
+                        LabeledContent("Precisión", value: "±\(location.horizontalAccuracy.formatted(.number.precision(.fractionLength(1)))) m")
+                    }
+                    if measuring {
+                        Text(gps.statusText).font(.caption)
+                        Button("Usar esta ubicación") {
+                            location = FieldStore.representativeFix(gps.fixes)
+                            stopGPS()
+                        }
+                        .disabled(gps.fixes.isEmpty)
+                        Button("Cancelar", role: .cancel, action: stopGPS)
+                    } else {
+                        Button {
+                            gps.start()
+                            measuring = true
+                        } label: {
+                            Label(location == nil ? "Tomar ubicación con GPS" : "Volver a tomar ubicación",
+                                  systemImage: "location")
+                        }
+                    }
+                } header: {
+                    Text("Ubicación")
+                } footer: {
+                    Text("Párate en el punto de referencia del sitio y espera unos segundos: la app combina todas las lecturas. Bajo techo la precisión empeora.")
+                }
+
                 if let error {
                     Section { Text(error).foregroundStyle(.red) }
                 }
             }
-            .navigationTitle("Nuevo sitio")
+            .navigationTitle(site == nil ? "Nuevo sitio" : "Editar sitio")
             .navigationBarTitleDisplayMode(.inline)
             .toolbar {
                 ToolbarItem(placement: .cancellationAction) { Button("Cancelar") { dismiss() } }
-                ToolbarItem(placement: .confirmationAction) { Button("Crear", action: create).disabled(!isValid) }
+                ToolbarItem(placement: .confirmationAction) {
+                    Button(site == nil ? "Crear" : "Guardar", action: save).disabled(!isValid || measuring)
+                }
             }
+            .onDisappear(perform: stopGPS)
         }
     }
 
-    private func create() {
-        let site = Site(name: name.trimmingCharacters(in: .whitespaces),
-                        code: code.trimmingCharacters(in: .whitespaces))
+    private func stopGPS() {
+        gps.stop()
+        measuring = false
+    }
+
+    private func save() {
+        var updated = site ?? Site(name: "", code: "")
+        updated.name = name.trimmingCharacters(in: .whitespaces)
+        updated.code = code.trimmingCharacters(in: .whitespaces)
+        updated.location = location
         do {
-            try FieldStore.createSite(site)
+            try FieldStore.saveSite(updated)
             dismiss()
         } catch {
-            self.error = "No se pudo crear el sitio: \(error)"
+            self.error = "No se pudo guardar el sitio: \(error)"
         }
     }
 }

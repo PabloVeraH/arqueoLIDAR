@@ -34,13 +34,18 @@ public struct Site: Sendable, Codable, Equatable {
     public var name: String
     public var code: String
     public var siteFrame: SiteFrame?
+    /// Punto GPS de referencia del sitio (mediana ponderada de una serie de
+    /// lecturas). A diferencia de `siteFrame`, no requiere el norte verdadero.
+    public var location: GeoFix?
     public var createdAt: Date
 
-    public init(siteID: UUID = UUID(), name: String, code: String, siteFrame: SiteFrame? = nil, createdAt: Date = Date()) {
+    public init(siteID: UUID = UUID(), name: String, code: String, siteFrame: SiteFrame? = nil,
+                location: GeoFix? = nil, createdAt: Date = Date()) {
         self.siteID = siteID
         self.name = name
         self.code = code
         self.siteFrame = siteFrame
+        self.location = location
         self.createdAt = createdAt
     }
 }

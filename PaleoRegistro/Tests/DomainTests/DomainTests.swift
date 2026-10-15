@@ -22,6 +22,20 @@ struct DomainTests {
         _ = frame
     }
 
+    @Test("Site guarda su ubicación y lee fichas antiguas sin ella")
+    func siteLocationCodable() throws {
+        let fix = try GeoFix(latitude: -22.89, longitude: -69.32, altitude: 1200, horizontalAccuracy: 4,
+                             verticalAccuracy: 6, timestamp: Date(timeIntervalSince1970: 1_700_000_000), source: .coreLocation)
+        let site = Site(name: "Quebrada", code: "QLR-01", location: fix)
+        #expect(try JSONDecoder().decode(Site.self, from: JSONEncoder().encode(site)) == site)
+
+        // Ficha escrita antes de que existiera `location`.
+        var old = try JSONSerialization.jsonObject(with: JSONEncoder().encode(Site(name: "A", code: "B"))) as! [String: Any]
+        old.removeValue(forKey: "location")
+        let decoded = try JSONDecoder().decode(Site.self, from: JSONSerialization.data(withJSONObject: old))
+        #expect(decoded.location == nil)
+    }
+
     @Test("Plane normaliza su normal")
     func planeNormalizes() throws {
         let p = try Plane(point: SIMD3(0,0,0), normal: SIMD3(0, 2, 0))

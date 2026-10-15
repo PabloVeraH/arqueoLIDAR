@@ -9,7 +9,7 @@ PaleoRegistro es una **app para iPhone** que convierte el teléfono en una **lib
 La app ya existe como proyecto de Xcode (`arqueoLidar.xcodeproj` y la carpeta `arqueoLidar/`) y tiene dos pestañas:
 
 - **Terreno**: el flujo de trabajo real.
-  1. Se registra el **sitio** o yacimiento (nombre y código). Dentro de cada sitio se crea el expediente de cada hallazgo con su nombre, código de expedición, responsable y permiso CMN. Cada expediente guarda una copia de la ficha del sitio, así que al compartirlo se sabe dónde se hizo. Los hallazgos creados antes de que existieran los sitios aparecen en "Hallazgos sin sitio".
+  1. Se registra el **sitio** o yacimiento (nombre, código y su **punto GPS de referencia**, que la app calcula combinando varias lecturas). Los sitios se **editan** o **eliminan** deslizando su fila; solo se puede eliminar un sitio **sin hallazgos**. Dentro de cada sitio se crea el expediente de cada hallazgo con su nombre, código de expedición, responsable y permiso CMN. Cada expediente guarda una copia de la ficha del sitio, así que al compartirlo se sabe dónde se hizo. Los hallazgos creados antes de que existieran los sitios aparecen en "Hallazgos sin sitio".
   2. Se escanea con la **cámara y el LiDAR**, viendo la malla 3D en vivo sobre la imagen, mientras el **GPS** registra todas sus lecturas. Un panel muestra si el seguimiento es bueno, la temperatura del teléfono y el espacio libre. Un botón "Medir ruido" indica cuánto tiembla la medición sobre una pared plana, en milímetros.
   3. Al guardar, el escaneo se **sella** automáticamente.
   4. El escaneo se puede **ver en 3D**: girar con un dedo y acercar con dos.
@@ -222,7 +222,7 @@ Lo que la pestaña Terreno **todavía no hace**:
 1. **Firma con Face ID y el chip seguro del iPhone.** Hoy firma con una clave de software que se genera de nuevo cada vez que se abre la app. La cadena se puede verificar igual, pero como prueba de autoría es más débil de lo que pide el plan.
 2. **Mediciones desde la pantalla.** Volúmenes, potencia de estratos, separación de especímenes y comparación entre dos campañas ya están programados y probados, pero todavía no tienen botones en la app.
 3. **Norte verdadero.** El modelo 3D queda con la vertical correcta, pero su giro respecto del norte es arbitrario. Falta guardar el recorrido de la cámara para calcularlo con la traza GPS.
-4. **Ubicación y edición del sitio.** El sitio tiene nombre y código, pero todavía no guarda su punto de referencia (datum) ni se puede editar o borrar.
+4. **Marco del sitio con norte verdadero.** El sitio guarda su punto GPS, pero todavía no la orientación respecto del norte (ver punto 3).
 5. **Informe PDF, CSV de especímenes y fotos de respaldo.** El CSV ya existe en el núcleo, pero solo tiene sentido cuando haya especímenes separados.
 
 Arreglos que ya están en esta rama (traídos de `dev`):

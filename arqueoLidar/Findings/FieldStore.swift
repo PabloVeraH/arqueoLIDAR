@@ -63,10 +63,24 @@ nonisolated enum FieldStore {
             .sorted { $0.name.localizedStandardCompare($1.name) == .orderedAscending }
     }
 
-    static func createSite(_ site: Site) throws {
+    /// Crea o actualiza la ficha. Las copias `site.json` ya selladas dentro de cada
+    /// expediente no cambian: registran el sitio tal como era al crear el hallazgo.
+    static func saveSite(_ site: Site) throws {
         try FileManager.default.createDirectory(at: sitesDir, withIntermediateDirectories: true)
-        try CanonicalJSONEncoder().encode(site)
-            .write(to: sitesDir.appendingPathComponent("SIT-\(site.siteID.uuidString.prefix(8)).json"), options: .atomic)
+        try CanonicalJSONEncoder().encode(site).write(to: siteFile(site), options: .atomic)
+    }
+
+    /// Solo se borra un sitio vacío. La regla vive aquí para que ningún llamador la salte.
+    static func deleteSite(_ site: Site) throws {
+        let n = findings(in: site).count
+        guard n == 0 else {
+            throw FieldError("El sitio tiene \(n) hallazgo(s). Solo se pueden eliminar sitios sin hallazgos.")
+        }
+        try FileManager.default.removeItem(at: siteFile(site))
+    }
+
+    private static func siteFile(_ site: Site) -> URL {
+        sitesDir.appendingPathComponent("SIT-\(site.siteID.uuidString.prefix(8)).json")
     }
 
     // MARK: - Hallazgos
