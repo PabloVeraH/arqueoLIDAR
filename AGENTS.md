@@ -39,6 +39,9 @@ y `grep` de los nombres o textos relevantes.
 - `.sealed` de cada escaneo se escribe **antes** de sellar.
 - `Hasher.buildManifest` usa `enumerator(atPath:)` (rutas relativas; arregla
   `/var` vs `/private/var` en iOS).
+- El usuario final ve solo funciones de terreno (Sitios → Hallazgos → Captura → Visor/Exportar/Verificar).
+  Las librerías internas no se muestran en la app: la pestaña Diagnóstico existe solo en `#if DEBUG`
+  (`ArqueoLidarApp.swift`). No agregues pantallas que expongan módulos o términos internos.
 - Solo `Rendering/` importa SceneKit. Target de la app: Swift 5 mode con
   `SWIFT_DEFAULT_ACTOR_ISOLATION = MainActor`; los tipos auxiliares son `nonisolated`.
 

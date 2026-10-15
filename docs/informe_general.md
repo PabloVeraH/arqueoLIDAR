@@ -4,34 +4,95 @@
 
 PaleoRegistro es una **app para iPhone** que convierte el teléfono en una **libreta de campo 3D con valor de prueba**. Usa el sensor LiDAR (un "radar de luz" que traen los iPhone Pro y mide distancias con láser) para dejar registrado un hallazgo con forma, medidas y ubicación GPS. Además le pone un **sello que muestra si alguien alteró el registro después**. Está pensada para el aviso al Consejo de Monumentos Nacionales bajo la Ley 17.288 y funciona **sin internet**.
 
-## Lo primero: en qué estado está
+Este informe tiene dos partes:
 
-La app ya existe como proyecto de Xcode (`arqueoLidar.xcodeproj` y la carpeta `arqueoLidar/`) y tiene dos pestañas:
-
-- **Terreno**: el flujo de trabajo real.
-  1. Se registra el **sitio** o yacimiento (nombre, código y su **punto GPS de referencia**, que la app calcula combinando varias lecturas). Los sitios se **editan** o **eliminan** deslizando su fila; solo se puede eliminar un sitio **sin hallazgos**. Dentro de cada sitio se crea el expediente de cada hallazgo con su nombre, código de expedición, responsable y permiso CMN. Cada expediente guarda una copia de la ficha del sitio, así que al compartirlo se sabe dónde se hizo. Los hallazgos creados antes de que existieran los sitios aparecen en "Hallazgos sin sitio".
-  2. Se escanea con la **cámara y el LiDAR**, viendo la malla 3D en vivo sobre la imagen, mientras el **GPS** registra todas sus lecturas. Un panel muestra si el seguimiento es bueno, la temperatura del teléfono y el espacio libre. Un botón "Medir ruido" indica cuánto tiembla la medición sobre una pared plana, en milímetros.
-  3. Al guardar, el escaneo se **sella** automáticamente.
-  4. El escaneo se puede **ver en 3D**: girar con un dedo y acercar con dos.
-  5. Se puede **exportar** a PLY, STL, OBJ, LAS y GeoJSON y compartir los archivos.
-  6. Se puede **verificar** la cadena de custodia desde la misma app.
-  7. Se puede **eliminar** un expediente deslizando su fila, pero **solo si no pasa la verificación** (por ejemplo, una prueba fallida o un expediente sin escaneos). Un expediente íntegro es evidencia y la app no deja borrarlo.
-- **Diagnóstico**: corre las pruebas de cada módulo en el teléfono, con datos de resultado conocido, para confirmar que los cálculos están bien.
-
-**Importante:** la pestaña Terreno se escribió sin poder compilarla, porque se hizo en un computador Windows. Antes de usarla en un caso real, hay que compilarla en una Mac con Xcode y probarla en un iPhone Pro.
-
-Dónde quedan los archivos en el iPhone, en la app Archivos → En mi iPhone → ArqueoLiDAR:
-
-- `Findings/FND-…/`: el expediente sellado.
-- `Exports/FND-…/`: las exportaciones. Están fuera del expediente para no alterar el sello.
+- **Parte 1 — Qué puede hacer con la app:** lo que usted ve y usa en terreno.
+- **Parte 2 — Cómo funciona por dentro:** las librerías internas que hacen los cálculos. Usted nunca las abre; las usan las funciones de la Parte 1. Sirve a quien mantiene el código o a un perito que quiera saber cómo se obtuvo cada número.
 
 ---
 
-## Cómo se usaría en terreno, y qué módulo entra en cada paso
+# Parte 1 — Qué puede hacer con la app
+
+Al abrir la app se ve directamente la lista de **Sitios**. No hay más pantallas que aprender: todo se recorre de lo grande a lo pequeño.
+
+```
+Sitios → Hallazgos del sitio → Ficha del hallazgo → Escaneo → Visor 3D y exportación
+```
+
+### 1. Sitios
+
+- Se registra el **sitio** o yacimiento con nombre, código y su **punto GPS de referencia**. La app lo calcula combinando varias lecturas del GPS, no una sola.
+- Deslizando la fila del sitio se puede **editar** o **eliminar**. Solo se elimina un sitio **sin hallazgos**.
+- Los hallazgos creados antes de que existieran los sitios aparecen en "Hallazgos sin sitio".
+
+### 2. Hallazgos
+
+- Dentro de cada sitio se crea el **expediente** de cada hallazgo: nombre, código de expedición, responsable, institución y permiso CMN. El responsable se recuerda para el siguiente hallazgo.
+- Cada expediente guarda una **copia sellada de la ficha del sitio**: al compartirlo se sabe dónde se hizo, aunque después se edite el sitio.
+- Un expediente se puede **eliminar** deslizando su fila, pero **solo si no pasa la verificación** (por ejemplo, una prueba fallida o un expediente sin escaneos). Un expediente íntegro es evidencia y la app no deja borrarlo.
+
+### 3. Captura LiDAR
+
+- Se escanea con la **cámara y el LiDAR**, viendo la malla 3D en vivo sobre la imagen, mientras el **GPS** registra todas sus lecturas.
+- Un panel muestra si el seguimiento es bueno, la temperatura del teléfono y el espacio libre.
+- El botón "Medir ruido" indica cuánto tiembla la medición sobre una pared plana, en milímetros.
+- Al guardar se elige el **propósito** (registro inicial, monitoreo, evaluación de daño, rescate…) y el escaneo se **sella** automáticamente. Si el GPS fue malo, queda marcado "GPS degradado" o "Sin GPS".
+
+### 4. Visor 3D
+
+- El escaneo guardado se puede **ver en 3D**: girar con un dedo y acercar con dos. Muestra también su ubicación y precisión.
+
+### 5. Exportar
+
+- Genera **PLY, STL, OBJ, LAS y GeoJSON**, cada uno con su ficha técnica `record.json`, y permite compartirlos.
+- Los archivos quedan en la app Archivos → En mi iPhone → ArqueoLiDAR → `Exports/`, **fuera** del expediente para no alterar el sello.
+
+### 6. Verificar el expediente
+
+- Comprueba la **cadena de custodia**: dice "Íntegro" o lista qué archivo cambió, falta o sobra.
+- El expediente completo se puede compartir y verificar en un computador **sin la app** con `tools/verify_chain.py`.
+
+### Lo que la app todavía no hace
+
+1. **Firma con Face ID y el chip seguro del iPhone.** Hoy firma con una clave de software que se genera de nuevo cada vez que se abre la app. La cadena se puede verificar igual, pero como prueba de autoría es más débil de lo que pide el plan.
+2. **Mediciones desde la pantalla.** Volúmenes, potencia de estratos, separación de especímenes y comparación entre dos campañas ya están programados y probados, pero todavía no tienen botones en la app.
+3. **Norte verdadero.** El modelo 3D queda con la vertical correcta, pero su giro respecto del norte es arbitrario. Falta guardar el recorrido de la cámara para calcularlo con la traza GPS. Por lo mismo, el sitio guarda su punto GPS pero no su orientación.
+4. **Notificación al CMN** (fecha, canal, folio) dentro del expediente.
+5. **Informe PDF, CSV de especímenes y fotos de respaldo.** El CSV ya existe por dentro, pero solo tiene sentido cuando haya especímenes separados.
+
+**Importante:** buena parte de las pantallas se escribió sin poder compilarlas, porque se hizo en un computador Windows. Antes de usarlas en un caso real hay que compilarlas en una Mac con Xcode y probarlas en un iPhone Pro (ver `docs/registro_pruebas.md`).
+
+Dónde quedan los archivos en el iPhone, en la app Archivos → En mi iPhone → ArqueoLiDAR:
+
+- `Sites/`: las fichas de los sitios.
+- `Findings/FND-…/`: el expediente sellado.
+- `Exports/FND-…/`: las exportaciones.
+
+---
+
+# Parte 2 — Cómo funciona por dentro
+
+Las funciones de la Parte 1 se apoyan en **11 librerías internas** (el paquete `PaleoRegistro`). Ninguna aparece en la app: son el motor.
+
+Quien desarrolla puede comprobarlas en el iPhone con la pestaña **Diagnóstico**, que corre las pruebas de cada librería con datos de resultado conocido. Esa pestaña **solo aparece al instalar la app desde Xcode**; la versión que se entrega a los usuarios (TestFlight o App Store) no la muestra.
+
+## Qué librería trabaja en cada función
+
+| Función de la app | Librerías que usa |
+|---|---|
+| Sitios | Estructura de Trabajo, Geo |
+| Hallazgos | Estructura de Trabajo, Persistence, Custody (para decidir si se puede borrar) |
+| Captura LiDAR | Mesh, Geo, Geometry ("Medir ruido"), Persistence, Custody |
+| Visor 3D | Mesh |
+| Exportar | Export, Geo |
+| Verificar el expediente | Custody |
+| Mediciones, estratos, especímenes, comparación (aún sin pantalla) | Volume, Stratigraphy, Segmentation, Geometry, Registration |
+
+## Cómo se usarían en terreno
 
 Supongamos que una retroexcavadora encuentra un hueso grande en una obra:
 
-| Paso en terreno | Módulo que trabaja |
+| Paso en terreno | Librería que trabaja |
 |---|---|
 | 1. Se recorre el hallazgo con el iPhone y se van juntando los "pedazos" del escaneo | **Mesh** |
 | 2. La app registra dónde está, en coordenadas UTM | **Geo** |
@@ -44,11 +105,11 @@ Supongamos que una retroexcavadora encuentra un hueso grande en una obra:
 | 9. Meses después se vuelve a escanear y se compara | **Registration** |
 | 10. Se exportan archivos para el informe, el museo o la impresión 3D | **Export** |
 
-Todos los módulos se apoyan en uno más: la **Estructura de Trabajo** (en el código se llama `Domain`), el vocabulario común.
+Todas se apoyan en una más: la **Estructura de Trabajo** (en el código se llama `Domain`), el vocabulario común.
 
 ---
 
-## Los 11 módulos, uno por uno
+## Las 11 librerías, una por una
 
 ### 1. Estructura de Trabajo (`Domain` en el código): el vocabulario común
 
@@ -85,7 +146,7 @@ Una regla importante: **un escaneo sellado nunca se edita ni se borra**. Si sali
 
 ### 3. Mesh: armar y limpiar el modelo 3D
 
-**Qué hace:** el iPhone captura el objeto en muchos pedazos de "malla", una red de triangulitos que forma la superficie. Este módulo:
+**Qué hace:** el iPhone captura el objeto en muchos pedazos de "malla", una red de triangulitos que forma la superficie. Esta librería:
 
 - **une** los pedazos en un solo modelo,
 - **recorta** solo la zona de interés y descarta la carretilla, los árboles y las piernas del ayudante,
@@ -98,7 +159,7 @@ Una regla importante: **un escaneo sellado nunca se edita ni se borra**. Si sali
 
 ### 4. Volume: cuánto material hay o cuánto falta
 
-Tiene **tres formas de medir**. La app elige la adecuada según para qué se hizo el escaneo:
+Tiene **tres formas de medir**. La app elegirá la adecuada según para qué se hizo el escaneo:
 
 | Método | Cuándo se usa | Ejemplo |
 |---|---|---|
@@ -116,7 +177,7 @@ También distingue entre **volumen expuesto** (lo que se ve y se midió) y **vol
 
 **Cómo se usa:** el LiDAR **no ve** el cambio entre dos arcillas igual de duras, porque la diferencia es de color y textura, no de forma. Por eso:
 
-1. la app genera la orto-imagen de la pared (módulo Geometry),
+1. la app genera la orto-imagen de la pared (librería Geometry),
 2. **usted marca con el dedo** los límites entre estratos sobre esa imagen,
 3. la app calcula el espesor **verdadero**, medido perpendicular a los estratos, y también el **aparente**.
 
@@ -160,7 +221,7 @@ FND-2026-0412-9f3a/
 
 ### 9. Custody: la cadena de custodia
 
-Este es el **módulo legalmente más importante**.
+Esta es la **librería legalmente más importante**.
 
 **Qué hace:**
 
@@ -215,15 +276,7 @@ La regla es que **cualquier número se pueda recalcular exactamente** a partir d
 
 ---
 
-## Lo que todavía falta o tiene problemas
-
-Lo que la pestaña Terreno **todavía no hace**:
-
-1. **Firma con Face ID y el chip seguro del iPhone.** Hoy firma con una clave de software que se genera de nuevo cada vez que se abre la app. La cadena se puede verificar igual, pero como prueba de autoría es más débil de lo que pide el plan.
-2. **Mediciones desde la pantalla.** Volúmenes, potencia de estratos, separación de especímenes y comparación entre dos campañas ya están programados y probados, pero todavía no tienen botones en la app.
-3. **Norte verdadero.** El modelo 3D queda con la vertical correcta, pero su giro respecto del norte es arbitrario. Falta guardar el recorrido de la cámara para calcularlo con la traza GPS.
-4. **Marco del sitio con norte verdadero.** El sitio guarda su punto GPS, pero todavía no la orientación respecto del norte (ver punto 3).
-5. **Informe PDF, CSV de especímenes y fotos de respaldo.** El CSV ya existe en el núcleo, pero solo tiene sentido cuando haya especímenes separados.
+## Arreglos recientes
 
 Arreglos que ya están en esta rama (traídos de `dev`):
 
