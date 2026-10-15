@@ -140,6 +140,20 @@ nonisolated enum FieldStore {
         catch { return .invalid([(error as? CustodyError) ?? .verificationFailed("\(error)")]) }
     }
 
+    /// Borra un expediente solo si NO verifica como íntegro (sin escaneos, sellos
+    /// rotos o archivos alterados): son pruebas fallidas, no evidencia. Un
+    /// expediente íntegro es evidencia sellada y no se borra nunca (plan §2.B).
+    /// La regla se aplica aquí, no en la vista, para que ningún llamador la salte.
+    static func deleteIfNotIntact(_ finding: Finding) async throws {
+        if await verify(finding).isValid {
+            throw FieldError("Este expediente está íntegro y sellado: es evidencia y no se puede eliminar.")
+        }
+        let fm = FileManager.default
+        try fm.removeItem(at: findingDir(finding))
+        let exports = documents.appendingPathComponent("Exports").appendingPathComponent(findingDir(finding).lastPathComponent)
+        if fm.fileExists(atPath: exports.path) { try fm.removeItem(at: exports) }
+    }
+
     private static func lastSeal(_ findingDir: URL) -> SealRecord? {
         let chain = findingDir.appendingPathComponent("seals/chain.jsonl")
         guard let text = try? String(contentsOf: chain, encoding: .utf8),

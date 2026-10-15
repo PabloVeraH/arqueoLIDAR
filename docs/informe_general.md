@@ -15,6 +15,7 @@ La app ya existe como proyecto de Xcode (`arqueoLidar.xcodeproj` y la carpeta `a
   4. El escaneo se puede **ver en 3D**: girar con un dedo y acercar con dos.
   5. Se puede **exportar** a PLY, STL, OBJ, LAS y GeoJSON y compartir los archivos.
   6. Se puede **verificar** la cadena de custodia desde la misma app.
+  7. Se puede **eliminar** un expediente deslizando su fila, pero **solo si no pasa la verificación** (por ejemplo, una prueba fallida o un expediente sin escaneos). Un expediente íntegro es evidencia y la app no deja borrarlo.
 - **Diagnóstico**: corre las pruebas de cada módulo en el teléfono, con datos de resultado conocido, para confirmar que los cálculos están bien.
 
 **Importante:** la pestaña Terreno se escribió sin poder compilarla, porque se hizo en un computador Windows. Antes de usarla en un caso real, hay que compilarla en una Mac con Xcode y probarla en un iPhone Pro.

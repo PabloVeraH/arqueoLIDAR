@@ -9,6 +9,8 @@ import Domain
 struct FindingsListView: View {
     @State private var findings: [Finding] = []
     @State private var showNew = false
+    @State private var pendingDelete: Finding?
+    @State private var deleteError: String?
 
     var body: some View {
         NavigationStack {
@@ -23,6 +25,28 @@ struct FindingsListView: View {
                             .foregroundStyle(.secondary)
                     }
                 }
+                .swipeActions {
+                    Button(role: .destructive) {
+                        pendingDelete = finding
+                    } label: {
+                        Label("Eliminar", systemImage: "trash")
+                    }
+                }
+            }
+            .confirmationDialog(
+                "¿Eliminar «\(pendingDelete?.title ?? "")»?",
+                isPresented: Binding(get: { pendingDelete != nil }, set: { if !$0 { pendingDelete = nil } }),
+                titleVisibility: .visible,
+                presenting: pendingDelete
+            ) { finding in
+                Button("Eliminar expediente", role: .destructive) { delete(finding) }
+            } message: { _ in
+                Text("Solo se pueden eliminar expedientes sin escaneos o que no pasan la verificación de custodia. Los expedientes íntegros son evidencia y quedan protegidos. No se puede deshacer.")
+            }
+            .alert("No se eliminó", isPresented: Binding(get: { deleteError != nil }, set: { if !$0 { deleteError = nil } })) {
+                Button("OK", role: .cancel) {}
+            } message: {
+                Text(deleteError ?? "")
             }
             .overlay {
                 if findings.isEmpty {
@@ -41,6 +65,17 @@ struct FindingsListView: View {
     }
 
     private func reload() { findings = FieldStore.findings() }
+
+    private func delete(_ finding: Finding) {
+        Task {
+            do {
+                try await FieldStore.deleteIfNotIntact(finding)
+            } catch {
+                deleteError = error.localizedDescription
+            }
+            reload()
+        }
+    }
 }
 
 struct NewFindingView: View {

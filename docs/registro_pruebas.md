@@ -55,4 +55,6 @@ advertencias** de código en Xcode 27 beta (destino iPhone).
 - Escaneo de un objeto de medidas conocidas (caja) y comparación contra huincha.
 - Prueba con GPS denegado.
 - Expedientes de las 23:04, 23:06 y 23:15 quedaron con sellos inválidos (rutas
-  rotas del bug ya corregido); se pueden borrar.
+  rotas del bug ya corregido); se pueden borrar deslizando la fila en Terreno → Hallazgos.
+- Eliminar: un expediente con sellos inválidos o sin escaneos debe borrarse tras
+  confirmar; uno íntegro (p. ej. FND-D820CF5D) debe mostrar "No se eliminó" y seguir en la lista.
