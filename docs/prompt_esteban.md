@@ -1,125 +1,68 @@
 # Prompt para el asistente de Esteban
 
-Copiar todo el bloque de abajo y pegarlo en el asistente de código (Claude Code u otro),
-abierto en la carpeta del repo `arqueoLIDAR` en la Mac.
+Copiar el bloque de abajo y pegarlo en el asistente de código, abierto en la carpeta
+del repo `arqueoLIDAR` en la Mac.
 
 ```
-Contexto: trabajas en el repo arqueoLIDAR (app iOS "PaleoRegistro" para registro LiDAR
-de hallazgos arqueológicos/paleontológicos, Ley 17.288 Chile). Otra sesión de LLM, sin
-acceso a Xcode ni a un Mac, integró cambios en la rama `feat/arreglosEsteban` y los
-subió a GitHub (HEAD = 8170dc8). Ese código NUNCA se ha compilado. Tu trabajo es
-actualizar tu copia local, compilar, corregir lo que falle y verificar en un iPhone Pro.
+Trabajas en el repo arqueoLIDAR (app iOS PaleoRegistro), rama feat/arreglosEsteban.
+Lee primero AGENTS.md y síguelo: dos personas trabajan en esta rama.
 
-## 1. Qué cambió en la rama (lee esto antes de tocar nada)
+1. ACTUALIZAR
+   - git status. Si hay cambios locales, haz commit antes de seguir; no los pierdas.
+   - git fetch origin && git pull --no-rebase. Nunca push --force.
+   - Lee lo nuevo: git log --oneline -12 y git show de los commits desde a8e2047.
 
-- Merge de `origin/dev` (4861afb): arreglos de ICP (error 0,20 m → ~2 mm),
-  PLYCodec con colores/normales, IntegrationTests reales, guarda de arquitectura en CI,
-  check_utm.py contra el UTMConverter real. Se adaptó `ModuleSelfTests.swift`:
-  `RegistrationError.degenerate` ahora tiene 2 valores asociados, y el autotest de
-  "ICP recupera transformación" usa umbral 5 mm y `denseCube(divisions: 8)`, igual que
-  RegistrationTests. `EndToEndTests.swift` importa CryptoKit/Crypto con la misma guarda
-  `#if canImport(CryptoKit)` que Custody.
-- Flujo de terreno (0d3722a) + merge con tu commit ea640f8 (8170dc8):
-  - SE CONSERVA TU CAPTURA: ScanController, MeshAnchorReader, WireframeRenderer,
-    CaptureView, SavedScanView y tu `tools/verify_chain.py` (reemplazó al de dev).
-  - SE ELIMINARON `Findings/FindingService.swift` y `UI/FindingsView.swift`. Los
-    reemplaza `Findings/FieldStore.swift` (enum `nonisolated`, sin actor), que permite
-    VARIOS escaneos por hallazgo. Antes cada escaneo creaba un hallazgo nuevo.
-  - `CaptureView` ahora es `CaptureView(finding:)`. El formulario de guardado pide
-    `ScanPurpose` y muestra el estado del GPS (ya no pide título ni autor, que vienen
-    del Finding). Llama a `FieldStore.saveScan(parts:fixes:purpose:finding:)`, que
-    devuelve `SavedScan`.
-  - Nuevo `Capture/LocationRecorder.swift` (CLLocationManager): serie completa de
-    GeoFix durante la captura, se ve en el HUD y se guarda en `scans/<id>/geo.json`.
-  - Nuevo `Rendering/MeshViewer.swift`: visor SceneKit offline de un escaneo guardado.
-  - `UI/FieldViews.swift`: lista de hallazgos, alta de hallazgo (claves AppStorage
-    `authorName`/`authorRole`/`authorInstitution`, las mismas que usabas), ficha del
-    hallazgo, detalle del escaneo con visor 3D y exportación.
-  - `ArqueoLidarApp` usa un TabView: "Terreno" (FindingsListView) y "Diagnóstico"
-    (ContentView, que volvió a ser solo el autodiagnóstico).
-  - Cambio en el núcleo: `Custody/Hasher.buildManifest` calcula la ruta relativa con
-    `resolvingSymlinksInPath()` en ambos lados. En iOS el contenedor puede aparecer
-    como /var/… o /private/var/…, y sin esto la ruta "relativa" del manifiesto salía
-    absoluta.
+2. QUÉ CAMBIÓ (escrito sin compilador, en Windows; NUNCA se ha compilado)
+   - Sitios: Terreno abre en SitesListView. Crear/editar sitio (SiteFormView) con
+     "Tomar ubicación con GPS" (LocationRecorder + FieldStore.representativeFix).
+     Eliminar sitio solo si no tiene hallazgos (FieldStore.deleteSite).
+   - Domain: Site tiene `location: GeoFix?` (nuevo test en DomainTests).
+   - Cada hallazgo se crea dentro de un sitio y su expediente guarda site.json
+     (queda en el manifiesto del primer sello). Hallazgos antiguos: "Hallazgos sin sitio".
+   - Eliminar hallazgo solo si NO verifica como íntegro (FieldStore.deleteIfNotIntact).
+   - Pestaña Diagnóstico solo en #if DEBUG (ArqueoLidarApp.swift); en Release la app
+     abre directo en Sitios. El módulo Domain se muestra como "Estructura de Trabajo".
+   No reviertas estas decisiones (ver AGENTS.md §3) sin una razón verificada.
 
-Decisiones deliberadas que NO debes revertir sin una razón concreta y verificada:
-- Las exportaciones van a `Documents/Exports/FND-…/<scan>/`, FUERA del expediente.
-  Un archivo nuevo dentro del bundle sellado hace que ChainVerifier lo reporte como
-  "archivo añadido no declarado".
-- `.sealed` se escribe ANTES de sellar (Hasher solo excluye el `.sealed` de la raíz,
-  no el de `scans/<id>/`). Tú ya hacías lo mismo.
-- La firma sigue usando `SoftwareSigningKey`, una por arranque de la app. Secure
-  Enclave + Face ID queda pendiente (F10).
+3. COMPILAR
+   - cd PaleoRegistro && swift build && swift test (todo debe pasar).
+   - Scripts/check_module_boundaries.sh y Scripts/test_module_boundaries.sh.
+   - xcodebuild -project arqueoLidar.xcodeproj -scheme arqueoLidar
+     -destination 'generic/platform=iOS' build (confirma el scheme con xcodebuild -list).
+   - Corrige con el cambio mínimo en el archivo correcto. Puntos de riesgo:
+     FieldViews.swift (dos .sheet en SitesListView, `if let` dentro de .sheet,
+     `if` dentro de .toolbar, init de SiteFormView con State(initialValue:)),
+     @State de LocationRecorder dentro de SiteFormView, interpolaciones en Text.
+     No silencies warnings de concurrencia con @unchecked Sendable.
 
-## 2. Actualizar tu copia
+4. PROBAR EN EL iPHONE PRO (no des nada por bueno sin esto)
+   Instalando desde Xcode (Debug):
+   a. Se ven dos pestañas: Terreno y Diagnóstico. Diagnóstico → probar todo: todas
+      pasan; "Estructura de Trabajo" aparece en lugar de "Domain".
+   b. Terreno muestra "Hallazgos sin sitio (N)" con los expedientes anteriores.
+   c. Crear sitio al aire libre → "Tomar ubicación con GPS" → esperar lecturas →
+      "Usar esta ubicación": muestra lat/lon/altura/precisión. La fila ya no dice
+      "sin ubicación". Anota la precisión obtenida.
+   d. Deslizar el sitio → Editar: cambiar nombre y volver a tomar GPS → se guarda.
+   e. Dentro del sitio: crear hallazgo (el formulario muestra el sitio) → escanear →
+      guardar → Verificar expediente → debe decir Íntegro (ahora incluye site.json).
+   f. Editar de nuevo el sitio → volver al hallazgo → Verificar → sigue Íntegro.
+   g. Eliminar sitio con hallazgos → "No se eliminó". Crear un sitio vacío y
+      eliminarlo → desaparece.
+   h. En "Hallazgos sin sitio": eliminar uno con sellos inválidos (23:04, 23:06,
+      23:15) → se borra. Intentar eliminar FND-D820CF5D (íntegro) → "No se eliminó".
+   i. Archivos → En mi iPhone → ArqueoLiDAR: existe Sites/ con SIT-….json, y
+      Findings/FND-…/site.json en el hallazgo nuevo.
+   Con configuración Release (Edit Scheme → Run → Build Configuration → Release):
+   j. La app abre directo en Sitios, sin barra de pestañas ni Diagnóstico.
 
-1. `git status`. Si tienes cambios sin commitear, haz commit (o stash) ANTES de
-   seguir. No los pierdas.
-2. `git fetch origin && git checkout feat/arreglosEsteban && git pull --no-rebase`.
-   Si hay conflictos, resuélvelos conservando la estructura descrita arriba e
-   integrando tu trabajo nuevo encima. Nunca hagas `push --force`.
-3. En Xcode: File → Packages → Reset Package Caches si falla la resolución del paquete
-   local `PaleoRegistro`.
-
-## 3. Compilar y corregir
-
-1. Paquete: `cd PaleoRegistro && swift build && swift test`. Todo debe pasar. Si algo
-   falla, distingue si es un bug real o un test mal construido (fixes.md documenta
-   ambos casos) antes de "arreglar" el test.
-2. Guarda de arquitectura: ejecuta `Scripts/check_module_boundaries.sh` y
-   `Scripts/test_module_boundaries.sh`.
-3. App: `xcodebuild -project arqueoLidar.xcodeproj -scheme arqueoLidar -destination
-   'generic/platform=iOS' build` (confirma el nombre del scheme con
-   `xcodebuild -list`). Corrige errores con el cambio mínimo y en el archivo correcto.
-   El target usa Swift 5 mode con `SWIFT_DEFAULT_ACTOR_ISOLATION = MainActor`.
-   Puntos con más riesgo de error de compilación, porque se escribieron sin
-   compilador:
-   - `FieldStore.verify`: catch con typed throws (`error as? CustodyError`).
-   - `LocationRecorder`: métodos delegate `nonisolated` + `MainActor.assumeIsolated`.
-   - `FieldViews.swift`: interpolaciones dentro de `Text(...)`, `ShareLink(items:)`
-     con `[URL]`, y `switch` sobre `CustodyVerdict` dentro de un ViewBuilder.
-   - `MeshViewer`: `SceneView(scene:pointOfView:options:)` y la aritmética con
-     `SCNVector3`.
-   - `CaptureView`: `ForEach(ScanPurpose.allCases, id: \.self)` con `$0.label`.
-   Trata también los warnings de concurrencia; no los silencies con
-   `@unchecked Sendable` salvo que esté justificado.
-
-## 4. Verificar en un iPhone Pro (no des nada por bueno sin esto)
-
-1. Pestaña Diagnóstico → "Probar todos los módulos": deben pasar todas las
-   verificaciones. Anota el error de ICP en mm.
-2. Terreno → crear hallazgo → escanear un objeto conocido (una caja de dimensiones
-   medidas con huincha). Confirma que el HUD muestra lecturas GPS, guarda y revisa
-   SavedScanView.
-3. En la ficha del hallazgo → "Verificar expediente" → debe decir Íntegro.
-4. Haz un SEGUNDO escaneo en el mismo hallazgo → vuelve a verificar → debe seguir
-   Íntegro, y chain.jsonl debe tener 2 sellos encadenados.
-5. Abre el escaneo: el visor 3D debe mostrar la malla encuadrada. Exporta: deben
-   generarse los 5 formatos + `record.json` (GeoJSON solo si hubo GPS), y aparecer en
-   Archivos → En mi iPhone → ArqueoLiDAR → Exports.
-6. Después de exportar, verifica de nuevo → debe seguir Íntegro. Esto prueba que las
-   exportaciones no contaminan el bundle sellado.
-7. Copia la carpeta `Findings/FND-…` al Mac y ejecuta
-   `pip install cryptography && python3 tools/verify_chain.py <carpeta>`: debe dar
-   OK con código 0. Luego altera 1 byte de `mesh.ply` en una copia → debe dar FALLO.
-8. Abre `malla.ply` en MeshLab/CloudCompare, `replica_mm.stl` en un slicer y
-   `nube.las` en QGIS. Compara las dimensiones de la caja contra la huincha: STL en
-   mm, el resto en m.
-9. Prueba con el GPS denegado y en interior (sin señal): el escaneo debe guardarse
-   marcado "Sin GPS" o "GPS degradado", y la exportación debe omitir solo el GeoJSON.
-
-## 5. Entregar
-
-- Commits pequeños con mensajes en español, al estilo del repo
-  (`fix(app): …`, `fix(custody): …`), terminando con la línea Co-Authored-By de
-  tu asistente.
-- Si algún punto del paso 4 falla en el núcleo (Custody, Hasher, PLYCodec), arréglalo
-  en la causa raíz y agrega un test en PaleoRegistro/Tests que lo cubra.
-- Actualiza `docs/informe_general.md` si cambia lo que la app hace o deja de hacer.
-  Está escrito para un paleontólogo o arqueólogo sin conocimientos técnicos;
-  mantén ese tono.
-- Haz push a `feat/arreglosEsteban` (sin force) y entrega un resumen: qué compiló a
-  la primera, qué tuviste que corregir, el resultado de cada punto del paso 4 (con
-  números: error ICP, σ de ruido, dimensiones medidas vs. huincha) y qué queda
-  pendiente.
+5. ENTREGAR
+   - Commits pequeños en español (fix(app): …), con la línea Co-Authored-By de tu asistente.
+   - Anota cada resultado de la sección 4 en docs/registro_pruebas.md (fecha, commit,
+     ✅/❌ con números) y saca de "Pendiente" lo que ya se probó.
+   - Si algo falla en el núcleo (PaleoRegistro), arréglalo en la causa raíz y agrega un test.
+   - git fetch otra vez antes de subir; si hay commits nuevos, pull e integra.
+     git push a feat/arreglosEsteban (sin force).
+   - Entrega un resumen: qué compiló a la primera, qué corregiste y por qué, resultado
+     de cada punto a–j, y qué queda pendiente.
 ```
