@@ -3,19 +3,18 @@ import Domain
 
 // ═══════════════════════════════════════════════════════════════════════════════
 // Pantalla de captura LiDAR: cámara + wireframe en vivo + HUD de diagnóstico,
-// prueba de ruido sobre una superficie y guardado sellado del escaneo.
+// registro GPS, prueba de ruido sobre una superficie y guardado sellado del
+// escaneo dentro del expediente del hallazgo.
 // ═══════════════════════════════════════════════════════════════════════════════
 
 struct CaptureView: View {
+    let finding: Finding
     @Environment(\.dismiss) private var dismiss
     @State private var controller = ScanController()
-
-    @AppStorage("authorName") private var authorName = ""
-    @AppStorage("authorRole") private var authorRole = "Arqueólogo/a"
-    @AppStorage("authorInstitution") private var authorInstitution = ""
+    @State private var location = LocationRecorder()
+    @State private var purpose: ScanPurpose = .baseline
 
     @State private var showSaveForm = false
-    @State private var title = ""
     @State private var isSaving = false
     @State private var saved: SavedScan?
     @State private var errorText: String?
@@ -59,12 +58,16 @@ struct CaptureView: View {
         }
         .task {
             controller.start()
+            location.start()
             while !Task.isCancelled {
                 controller.refresh()
                 try? await Task.sleep(for: .milliseconds(500))
             }
         }
-        .onDisappear { controller.pause() }
+        .onDisappear {
+            controller.pause()
+            location.stop()
+        }
         .sheet(isPresented: $showSaveForm) { saveForm }
         .sheet(item: $saved) { scan in SavedScanView(scan: scan) { saved = nil; dismiss() } }
         .alert("No se pudo guardar", isPresented: Binding(get: { errorText != nil }, set: { if !$0 { errorText = nil } })) {
@@ -95,6 +98,7 @@ struct CaptureView: View {
             Text("Anclas: \(controller.anchorCount) · Vértices: \(controller.vertexCount.formatted())")
             Text("Reconstrucción: \(controller.reconstructionText)")
             Text("Temperatura: \(controller.thermalText) · Disco libre: \(controller.freeDiskText)")
+            Text(location.statusText)
         }
         .font(.caption.monospacedDigit())
         .padding(10)
@@ -118,7 +122,6 @@ struct CaptureView: View {
                     .frame(maxWidth: .infinity)
             }
             Button {
-                title = "Escaneo " + Date().formatted(date: .abbreviated, time: .shortened)
                 showSaveForm = true
             } label: {
                 Label("Guardar", systemImage: "square.and.arrow.down")
@@ -136,18 +139,18 @@ struct CaptureView: View {
     private var saveForm: some View {
         NavigationStack {
             Form {
-                Section("Hallazgo") {
-                    TextField("Título", text: $title)
+                Section {
+                    LabeledContent("Hallazgo", value: finding.title)
+                    Picker("Propósito", selection: $purpose) {
+                        ForEach(ScanPurpose.allCases, id: \.self) { Text($0.label).tag($0) }
+                    }
+                } footer: {
+                    Text("Se firma a nombre de \(finding.author.name). El propósito define cómo se medirá después (volumen, daño, monitoreo…).")
                 }
                 Section {
-                    TextField("Nombre", text: $authorName)
-                        .textContentType(.name)
-                    TextField("Rol", text: $authorRole)
-                    TextField("Institución", text: $authorInstitution)
-                } header: {
-                    Text("Responsable del registro")
+                    Text(location.statusText)
                 } footer: {
-                    Text("Queda firmado en el sello de custodia. Se recuerda para los próximos escaneos.")
+                    Text("Se guarda la serie completa de lecturas GPS. Si la mejor precisión supera ±10 m, el escaneo queda marcado como «GPS degradado».")
                 }
                 Section {
                     Text("Se guardarán \(controller.vertexCount.formatted()) vértices de \(controller.anchorCount) anclas, fusionados en una sola malla.")
@@ -166,7 +169,6 @@ struct CaptureView: View {
                         ProgressView()
                     } else {
                         Button("Guardar y sellar") { save() }
-                            .disabled(authorName.trimmingCharacters(in: .whitespaces).isEmpty)
                     }
                 }
             }
@@ -176,16 +178,13 @@ struct CaptureView: View {
 
     private func save() {
         let parts = controller.collectParts()
-        let author = AuthorIdentity(
-            name: authorName.trimmingCharacters(in: .whitespaces),
-            role: authorRole.trimmingCharacters(in: .whitespaces),
-            institution: authorInstitution.trimmingCharacters(in: .whitespaces))
-        let finalTitle = title.trimmingCharacters(in: .whitespaces).isEmpty ? "Escaneo" : title
+        let fixes = location.fixes
         isSaving = true
         controller.pause()
         Task {
             do {
-                let result = try await FindingService.shared.saveScan(parts: parts, title: finalTitle, author: author)
+                let result = try await FieldStore.saveScan(parts: parts, fixes: fixes, purpose: purpose, finding: finding)
+                location.stop()
                 showSaveForm = false
                 try? await Task.sleep(for: .milliseconds(400))
                 saved = result

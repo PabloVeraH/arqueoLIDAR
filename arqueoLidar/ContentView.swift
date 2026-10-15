@@ -9,23 +9,10 @@ import Custody
 struct ContentView: View {
     @State private var results: [PaleoModule: [SelfCheck]] = [:]
     @State private var running: Set<PaleoModule> = []
-    @State private var showCapture = false
 
     var body: some View {
         NavigationStack {
             List {
-                Section("Terreno") {
-                    Button {
-                        showCapture = true
-                    } label: {
-                        Label("Nuevo escaneo LiDAR", systemImage: "camera.metering.matrix")
-                    }
-                    NavigationLink {
-                        FindingsView()
-                    } label: {
-                        Label("Expedientes guardados", systemImage: "folder")
-                    }
-                }
                 Section {
                     ForEach(PaleoModule.allCases) { module in
                         NavigationLink {
@@ -60,7 +47,6 @@ struct ContentView: View {
                 }
             }
             .navigationTitle("ArqueoLiDAR")
-            .fullScreenCover(isPresented: $showCapture) { CaptureView() }
         }
     }
 

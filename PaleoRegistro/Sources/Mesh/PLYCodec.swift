@@ -2,10 +2,20 @@ import Foundation
 import Domain
 
 // ═══════════════════════════════════════════════════════════════════════════════
-// F4/F9 — PLYCodec. Códec binario PLY (little-endian, x/y/z + caras
-// triangulares): única fuente de verdad del formato interno del bundle
-// (scans/<scanID>/mesh.ply, §2.B del plan) y del export PLY
-// (Export/PLYWriter, que delega en encode(_:) para no duplicar el formato).
+// F4/F9 — PLYCodec. Códec binario PLY (little-endian, x/y/z [+nx/ny/nz]
+// [+red/green/blue/alpha] + caras triangulares): única fuente de verdad del
+// formato interno del bundle (scans/<scanID>/mesh.ply, §2.B del plan) y del
+// export PLY (Export/PLYWriter, que delega en encode(_:) para no duplicar
+// el formato).
+//
+// Normales y colores por vértice son opcionales y se codifican solo si
+// `mesh.normals`/`mesh.colors` están presentes Y su cuenta coincide con
+// `mesh.vertices.count` — antes de este fix, PLYWriter los descartaba
+// siempre en silencio (fixes.md), perdiendo esos datos en cada export.
+//
+// No es un lector/escritor PLY genérico: decode(_:) asume el orden fijo de
+// propiedades que encode(_:) produce (x,y,z,[nx,ny,nz],[red,green,blue,alpha]),
+// no reordena según la cabecera de un PLY externo arbitrario.
 //
 // Vive en Mesh, que solo depende de Domain, para que Persistence pueda leer
 // de vuelta sus propias mallas sin depender de Export — Export ya depende
@@ -21,28 +31,56 @@ public enum PLYCodec {
     private static let maxHeaderSearchBytes = 4096
 
     /// Codifica una malla a PLY binario little-endian. Byte-determinista:
-    /// la misma malla produce siempre los mismos bytes.
+    /// la misma malla produce siempre los mismos bytes. `mesh.normals`/
+    /// `mesh.colors` se incluyen solo si su cuenta coincide exactamente con
+    /// `mesh.vertices.count`; si no coincide (invariante violada), se omiten
+    /// en vez de leer fuera de rango.
     public static func encode(_ mesh: Mesh) -> Data {
         var data = Data()
 
-        let header = """
-        ply
-        format binary_little_endian 1.0
-        comment PaleoRegistro PLY export
-        element vertex \(mesh.vertices.count)
-        property float x
-        property float y
-        property float z
-        element face \(mesh.triangleCount)
-        property list uchar int vertex_indices
-        end_header\n
-        """
+        let hasNormals = mesh.normals?.count == mesh.vertices.count
+        let hasColors = mesh.colors?.count == mesh.vertices.count
+
+        var headerLines = [
+            "ply",
+            "format binary_little_endian 1.0",
+            "comment PaleoRegistro PLY export",
+            "element vertex \(mesh.vertices.count)",
+            "property float x",
+            "property float y",
+            "property float z",
+        ]
+        if hasNormals {
+            headerLines.append(contentsOf: ["property float nx", "property float ny", "property float nz"])
+        }
+        if hasColors {
+            headerLines.append(contentsOf: [
+                "property uchar red", "property uchar green", "property uchar blue", "property uchar alpha",
+            ])
+        }
+        headerLines.append(contentsOf: [
+            "element face \(mesh.triangleCount)",
+            "property list uchar int vertex_indices",
+            "end_header",
+        ])
+        let header = headerLines.joined(separator: "\n") + "\n"
         data.append(header.data(using: .ascii)!)
 
-        for v in mesh.vertices {
+        for i in 0..<mesh.vertices.count {
+            let v = mesh.vertices[i]
             var x = v.x.bitPattern; withUnsafeBytes(of: &x) { data.append(contentsOf: $0) }
             var y = v.y.bitPattern; withUnsafeBytes(of: &y) { data.append(contentsOf: $0) }
             var z = v.z.bitPattern; withUnsafeBytes(of: &z) { data.append(contentsOf: $0) }
+            if hasNormals {
+                let n = mesh.normals![i]
+                var nx = n.x.bitPattern; withUnsafeBytes(of: &nx) { data.append(contentsOf: $0) }
+                var ny = n.y.bitPattern; withUnsafeBytes(of: &ny) { data.append(contentsOf: $0) }
+                var nz = n.z.bitPattern; withUnsafeBytes(of: &nz) { data.append(contentsOf: $0) }
+            }
+            if hasColors {
+                let c = mesh.colors![i]
+                data.append(contentsOf: [c.x, c.y, c.z, c.w])
+            }
         }
 
         var three: UInt8 = 3
@@ -58,8 +96,9 @@ public enum PLYCodec {
 
     /// Decodifica PLY binario little-endian producido por `encode(_:)`. No es
     /// un lector PLY genérico: no soporta ASCII, big-endian, ni propiedades
-    /// por vértice más allá de `x,y,z` — es el lector del formato interno
-    /// del bundle, simétrico de `encode(_:)`.
+    /// por vértice más allá de `x,y,z,[nx,ny,nz],[red,green,blue,alpha]` en
+    /// ese orden fijo — es el lector del formato interno del bundle,
+    /// simétrico de `encode(_:)`.
     public static func decode(_ data: Data) throws(MeshError) -> Mesh {
         guard let headerEnd = findHeaderEnd(data) else {
             throw .invalidInput("PLY sin 'end_header': cabecera incompleta o formato no reconocido")
@@ -87,8 +126,13 @@ public enum PLYCodec {
             throw .invalidInput("Cabecera PLY no declara 'element vertex'/'element face'")
         }
 
+        // Orden fijo, simétrico de encode(_:): x,y,z,[nx,ny,nz],[red,green,blue,alpha].
+        let hasNormals = headerText.contains("property float nx")
+        let hasColors = headerText.contains("property uchar red")
+        let vertexStride = 12 + (hasNormals ? 12 : 0) + (hasColors ? 4 : 0)
+
         let bodySize = data.distance(from: headerEnd, to: data.endIndex)
-        let expectedBodySize = nVerts * 12 + nFaces * 13
+        let expectedBodySize = nVerts * vertexStride + nFaces * 13
         guard bodySize == expectedBodySize else {
             throw .invalidInput(
                 "Tamaño de cuerpo PLY (\(bodySize)) no coincide con el esperado " +
@@ -99,11 +143,29 @@ public enum PLYCodec {
         var offset = headerEnd
         var vertices: [SIMD3<Float>] = []
         vertices.reserveCapacity(nVerts)
+        var normals: [SIMD3<Float>] = []
+        if hasNormals { normals.reserveCapacity(nVerts) }
+        var colors: [SIMD4<UInt8>] = []
+        if hasColors { colors.reserveCapacity(nVerts) }
+
         for _ in 0..<nVerts {
             let x = readFloat(data, at: &offset)
             let y = readFloat(data, at: &offset)
             let z = readFloat(data, at: &offset)
             vertices.append(SIMD3(x, y, z))
+            if hasNormals {
+                let nx = readFloat(data, at: &offset)
+                let ny = readFloat(data, at: &offset)
+                let nz = readFloat(data, at: &offset)
+                normals.append(SIMD3(nx, ny, nz))
+            }
+            if hasColors {
+                let r = data[offset]; offset = data.index(after: offset)
+                let g = data[offset]; offset = data.index(after: offset)
+                let b = data[offset]; offset = data.index(after: offset)
+                let a = data[offset]; offset = data.index(after: offset)
+                colors.append(SIMD4(r, g, b, a))
+            }
         }
 
         var indices: [UInt32] = []
@@ -119,7 +181,12 @@ public enum PLYCodec {
             indices.append(readUInt32(data, at: &offset))
         }
 
-        return Mesh(vertices: vertices, indices: indices)
+        return Mesh(
+            vertices: vertices,
+            indices: indices,
+            normals: hasNormals ? normals : nil,
+            colors: hasColors ? colors : nil
+        )
     }
 
     // MARK: - Helpers
