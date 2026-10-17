@@ -97,4 +97,4 @@ Solo se ejercitan en Diagnóstico (`ModuleSelfTests.swift`):
 | Fecha | Ítem | Estado | Commit |
 |---|---|---|---|
 | 2026-10-17 | Inventario inicial | — | 21f8258 |
-| 2026-10-17 | Firma v2, rotación declarada, chip seguro + Face ID/código, cancelar sin perder la malla | [~] sin compilar; falta prueba en iPhone | ver `git log` |
+| 2026-10-17 | Firma v2, rotación declarada, chip seguro + Face ID/código, cancelar sin perder la malla | [~] sin compilar; falta prueba en iPhone | 3d63b17, fbe49da |
