@@ -61,3 +61,22 @@ advertencias** de código en Xcode 27 beta (destino iPhone).
 - Sitios: crear un sitio, crear un hallazgo dentro, escanear y verificar → debe dar Íntegro (ahora el expediente incluye `site.json`). Los hallazgos anteriores deben verse en "Hallazgos sin sitio".
 - Sitios con GPS: crear un sitio y "Tomar ubicación con GPS" al aire libre → debe mostrar latitud, longitud y precisión; "sin ubicación" desaparece de la fila. Editar nombre/código y volver a tomar la ubicación.
 - Eliminar sitio: uno sin hallazgos se borra tras confirmar; uno con hallazgos debe mostrar "No se eliminó".
+
+### Pendiente: firma con chip seguro (commit de esta sesión, 2026-10-17)
+
+Escrito en Windows, **sin compilar**. Primero en la Mac:
+`cd PaleoRegistro && swift build && swift test` (suite nueva "firma v2 y rotación de
+clave", 7 pruebas) y `python3 tools/test_verify_chain.py` (ya pasa en Windows: 7/7).
+
+En el iPhone:
+
+- Guardar un escaneo → debe pedir **Face ID**; la pantalla final dice "Firma: Chip seguro del iPhone".
+- Cancelar Face ID → alerta "No se selló…", la malla sigue en pantalla y "Guardar" funciona otra vez.
+  En Archivos no debe aparecer ninguna carpeta de escaneo nueva y el expediente debe seguir **Íntegro**.
+- Fallar Face ID dos veces → debe ofrecer el código del iPhone, y con el código sí sella.
+- Cerrar y abrir la app, sellar un segundo escaneo en el mismo expediente → en
+  `seals/chain.jsonl` ambos sellos tienen el mismo `deviceKeyID` y el segundo no tiene `previousKeyID`.
+- Un expediente sellado antes de este cambio (sellos v1), al agregarle un escaneo, debe seguir
+  Íntegro; el sello nuevo lleva `"signatureVersion":2` y `previousKeyID` con la clave vieja.
+- `verify_chain.py` en la Mac sobre ese expediente → OK.
+- Simulador (sin chip seguro) → sella con "Clave de software (sin chip seguro)".

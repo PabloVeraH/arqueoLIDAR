@@ -36,7 +36,8 @@ Sitios → Hallazgos del sitio → Ficha del hallazgo → Escaneo → Visor 3D y
 - Se escanea con la **cámara y el LiDAR**, viendo la malla 3D en vivo sobre la imagen, mientras el **GPS** registra todas sus lecturas.
 - Un panel muestra si el seguimiento es bueno, la temperatura del teléfono y el espacio libre.
 - El botón "Medir ruido" indica cuánto tiembla la medición sobre una pared plana, en milímetros.
-- Al guardar se elige el **propósito** (registro inicial, monitoreo, evaluación de daño, rescate…) y el escaneo se **sella** automáticamente. Si el GPS fue malo, queda marcado "GPS degradado" o "Sin GPS".
+- Al guardar se elige el **propósito** (registro inicial, monitoreo, evaluación de daño, rescate…) y el escaneo se **sella**. Antes de guardar, el iPhone pide **Face ID o su código**: la firma se hace con una clave guardada en el **chip seguro** del teléfono, que no se puede copiar. Si se cancela Face ID, no se guarda nada y el escaneo sigue en pantalla para volver a intentarlo. Si el GPS fue malo, queda marcado "GPS degradado" o "Sin GPS".
+- Si el iPhone no tiene código configurado, igual se sella, pero con una clave común (sin chip seguro). La pantalla final y el propio sello lo indican, porque esa firma prueba menos.
 
 ### 4. Visor 3D
 
@@ -54,7 +55,7 @@ Sitios → Hallazgos del sitio → Ficha del hallazgo → Escaneo → Visor 3D y
 
 ### Lo que la app todavía no hace
 
-1. **Firma con Face ID y el chip seguro del iPhone.** Hoy firma con una clave de software que se genera de nuevo cada vez que se abre la app. La cadena se puede verificar igual, pero como prueba de autoría es más débil de lo que pide el plan.
+1. **Probar la firma con chip seguro en un iPhone real.** Ya está programada (Face ID o código, y cambio de clave declarado), pero falta probarla en el teléfono (ver `docs/registro_pruebas.md`).
 2. **Mediciones desde la pantalla.** Volúmenes, potencia de estratos, separación de especímenes y comparación entre dos campañas ya están programados y probados, pero todavía no tienen botones en la app.
 3. **Norte verdadero.** El modelo 3D queda con la vertical correcta, pero su giro respecto del norte es arbitrario. Falta guardar el recorrido de la cámara para calcularlo con la traza GPS. Por lo mismo, el sitio guarda su punto GPS pero no su orientación.
 4. **Notificación al CMN** (fecha, canal, folio) dentro del expediente.
@@ -226,7 +227,8 @@ Esta es la **librería legalmente más importante**.
 **Qué hace:**
 
 - Calcula una **huella digital** de cada archivo (un código llamado *hash*, de tipo SHA-256). Si se cambia un solo punto del modelo, la huella cambia por completo.
-- **Firma** esa huella con fecha, hora, GPS y autor.
+- **Firma** esa huella con fecha, hora, GPS y autor, usando una clave que vive en el **chip seguro** del iPhone y que solo se usa tras Face ID o el código. La firma cubre también el número del sello y la huella del sello anterior: no se puede borrar un sello del medio sin que se note.
+- Si cambia la clave (por ejemplo, un teléfono nuevo), el sello siguiente **declara cuál era la anterior**. Los sellos viejos siguen verificando, porque cada uno lleva su propia clave pública.
 - Encadena los sellos: cada sello incluye la huella del anterior. Así no se puede insertar ni antedatar un sello sin que se note.
 
 **Analogía:** es como un libro de actas foliado, donde cada página se firma y cita la página anterior. Si se arranca o se agrega una hoja, se detecta.
@@ -263,7 +265,7 @@ La regla es que **cualquier número se pueda recalcular exactamente** a partir d
 ## Las carpetas de apoyo
 
 - **`tools/`**: tres programas pequeños para revisar los resultados **desde fuera de la app**, de modo que un tercero pueda comprobarlos:
-  - `verify_chain.py`: comprueba que el expediente no fue manipulado.
+  - `verify_chain.py`: comprueba que el expediente no fue manipulado (`test_verify_chain.py` lo pone a prueba con expedientes adulterados a propósito).
   - `check_utm.py`: revisa las coordenadas.
   - `check_exports.py`: revisa que los archivos exportados estén bien formados.
 - **`Scripts/check_module_boundaries.sh`**: una revisión interna de orden del código. No le afecta a usted.

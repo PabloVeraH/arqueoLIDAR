@@ -12,12 +12,27 @@ Ya funciona: SHA-256 por archivo y manifiesto, cadena `seals/chain.jsonl` con
 `prevSealHash`, marca `.sealed`, `VERIFY.txt`, delta monótono entre sellos, verificador
 en la app y `tools/verify_chain.py`.
 
-- [ ] **Firma con Secure Enclave + Face ID** (Fase 10, parte B). Hoy `FieldStore` usa
-  `SoftwareSigningKey()`, que se regenera en cada arranque: cada sesión firma con otra
-  clave pública y no hay prueba de autoría.
-- [ ] **Cancelar Face ID** deja el escaneo sin sellar, en estado explícito, nunca a medias.
-- [ ] **Rotación de clave** (`keyRotation`): evento firmado por la clave nueva que declara
-  la anterior, para cambio de teléfono o de biometría.
+- [~] **Firma con Secure Enclave + Face ID o código** (Fase 10, parte B).
+  `arqueoLidar/Findings/SealingKeyStore.swift`: clave P-256 en el chip seguro, con
+  `.userPresence` (Face ID **o código**, decisión del 2026-10-17: Face ID falla en terreno
+  con lentes o casco). Sin chip seguro o sin código (simulador), clave de software
+  persistente en el llavero, y el sello lo declara (`keyProtection = software`).
+  Falta compilar y probar en el iPhone.
+- [~] **Cancelar Face ID** no escribe nada: la autenticación se pide antes de guardar y la
+  sesión AR se reanuda sin borrar la malla (`ScanController.resume`). Falta probar en el iPhone.
+- [~] **Rotación de clave**: en vez de un evento aparte, el sello que firma con una clave
+  nueva declara la anterior en `previousKeyID`, dentro de lo firmado. `ChainVerifier` y
+  `verify_chain.py` rechazan un cambio de clave no declarado. Límite: lo firma solo la clave
+  nueva (la vieja suele estar perdida), así que no prueba continuidad del operador.
+- [~] **Firma v2** (hueco encontrado el 2026-10-17): la firma v1 cubría solo
+  `rootHash|ms|autor`. Se podía borrar un sello intermedio y corregir el `prevSealHash`
+  del siguiente sin romper ninguna firma. La v2 firma índice, prevSealHash, keyID,
+  protección y rotación. Los sellos v1 siguen verificando. No se acepta un v1 después
+  de un v2. Pruebas: suite `SealV2Tests` (Swift, sin correr aún) y
+  `tools/test_verify_chain.py` (7/7 en Windows).
+- [ ] **Recortar el final de la cadena** (quitar los últimos sellos y sus escaneos) no se
+  detecta sin un ancla externa (copia entregada, TSA). Es un límite conocido; se
+  documenta, no se resuelve en v1.
 - [ ] **WORM real**: hoy solo se escribe `.sealed`; el directorio sellado no queda de solo
   lectura.
 - [ ] **Sellar antes / después de una intervención**: hoy solo se sella al guardar un escaneo.
@@ -81,4 +96,5 @@ Solo se ejercitan en Diagnóstico (`ModuleSelfTests.swift`):
 
 | Fecha | Ítem | Estado | Commit |
 |---|---|---|---|
-| 2026-10-17 | Inventario inicial | — | — |
+| 2026-10-17 | Inventario inicial | — | 21f8258 |
+| 2026-10-17 | Firma v2, rotación declarada, chip seguro + Face ID/código, cancelar sin perder la malla | [~] sin compilar; falta prueba en iPhone | ver `git log` |
