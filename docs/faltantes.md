@@ -126,3 +126,8 @@ Solo se ejercitan en Diagnóstico (`ModuleSelfTests.swift`):
 | 2026-10-17 | Firma v2, rotación declarada, chip seguro + Face ID/código, cancelar sin perder la malla | [~] sin compilar; falta prueba en iPhone | 3d63b17, fbe49da |
 | 2026-10-17 | Volumen medido vs. inferido en la ficha; marcar objeto al capturar; incertidumbre de volumen en m³ (bug) | [~] sin compilar; falta prueba en iPhone | c0f48bd, 48c4570 |
 | 2026-10-17 | Errores de custodia en palabras de terreno; historial de sellos | [~] sin compilar; falta prueba en iPhone | 4989ca7, 734b4de |
+| 2026-10-17 | VERIFY.txt para un tercero: SHA256SUMS + copia de verify_chain.py en seals/ | [~] falta prueba en Mac (M8) | 537eabf |
+| 2026-10-17 | Firma v3 (sello entero) + hora del GPS | [~] Python 12/12; Swift sin compilar (M9) | a3d347a |
+| 2026-10-17 | Sellar estado actual antes / después de intervenir | [~] sin compilar (M10) | 0190923 |
+| 2026-10-17 | Reemplazar un escaneo sin borrarlo | [~] sin compilar (M11) | e610b43 |
+| 2026-10-17 | Archivos sellados de solo lectura (WORM) | [~] sin compilar (M12) | 6277e84 |
