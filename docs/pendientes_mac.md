@@ -131,6 +131,15 @@ copia el expediente a la Mac. Ahí:
 **Bien si:** todo lo anterior. Si `verify_chain.py` no aparece en `seals/`, el recurso no
 quedó en la app.
 
+### M9 · 2026-10-17 · punto 2 de custodia · Firma v3 y hora del GPS
+`swift test`: en CustodyTests cambian `sealProducesValidRecord` (ahora espera v3) y hay 2
+pruebas nuevas ("editar la lectura GPS…", "Un sello v2…"). `python3 tools/test_verify_chain.py`
+→ 12/12. En el iPhone: sella un escaneo al aire libre, copia el expediente a la Mac y
+revisa el último sello en `seals/chain.jsonl`: debe tener `"signatureVersion":3` y
+`"gnssTime"` igual al `timestamp` de su `geo`. `python3 seals/verify_chain.py .` → OK.
+**Bien si:** todo verde. Si la firma v3 falla solo en el iPhone, sospecha de una
+diferencia entre lo que se firma (`SealPayload.bytes`) y lo que escribe `appendSeal`.
+
 ## Resueltas
 
 _(vacío)_

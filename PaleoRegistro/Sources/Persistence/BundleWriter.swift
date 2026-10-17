@@ -216,7 +216,9 @@ private enum VerifyTemplate {
         - No se ha modificado ningún archivo después del sellado.
         - El orden de los sellos: desde el formato v2, cada firma cubre su
           número y el hash del sello anterior; borrar o intercalar un sello
-          rompe la firma.
+          rompe la firma. Desde el formato v3, la firma cubre el sello entero,
+          incluida la ubicación GPS y la hora que entregó el GPS ("gnssTime"),
+          un segundo reloj que no depende del reloj del teléfono.
         - Si el sello dice keyProtection = "secureEnclave": la clave vive en el
           chip seguro de un iPhone, no se puede copiar, y sellar exigió Face ID
           o el código de ese iPhone.

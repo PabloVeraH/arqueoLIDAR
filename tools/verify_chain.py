@@ -32,6 +32,8 @@ Formato que replica (ver PaleoRegistro/Sources):
   - rootHash = SHA-256 del JSON canónico de la lista de FileDigest
     (claves ordenadas, sin espacios, UTF-8).
   - Payload firmado (ver SealPayload en Custody/SealSigner.swift):
+      v3 (signatureVersion = 3): la línea del sello en chain.jsonl con el valor
+        de "signatureDER" vaciado (""). Cubre todo el sello, incluido el GPS.
       v2 (signatureVersion = 2):
         "v2|<index>|<prevSealHash o ->|<rootHash>|<ms>|<deviceKeyID>|<keyProtection o ->|<previousKeyID o ->|<author.name>"
       v1 (sellos antiguos, sin signatureVersion):
@@ -106,11 +108,25 @@ def wall_clock_millis(value) -> int:
     raise ValueError(f"wallClock con tipo inesperado: {type(value).__name__}")
 
 
-def signed_payload(seal) -> bytes:
-    """Bytes firmados, igual que SealPayload.bytes(for:) en la app."""
+def version(seal) -> int:
+    """signatureVersion; los sellos antiguos no la traen (v1)."""
+    return seal.get("signatureVersion") or 1
+
+
+_SIGNATURE_RE = re.compile(rb'"signatureDER":"[^"]*"')
+
+
+def signed_payload(seal, raw_line=None) -> bytes:
+    """Bytes firmados, igual que SealPayload.bytes(for:) en la app.
+    v3 firma la línea del sello tal como está en chain.jsonl con la firma
+    vaciada: se reconstruye sobre los bytes originales, sin reformatear números."""
+    v = version(seal)
+    if v >= 3:
+        raw = raw_line if raw_line is not None else canonical_json_bytes(seal)
+        return _SIGNATURE_RE.sub(b'"signatureDER":""', raw, count=1)
     ms = wall_clock_millis(seal["wallClock"])
     name = seal["author"]["name"]
-    if seal.get("signatureVersion") != 2:
+    if v == 1:
         return f"{seal['rootHash']}|{ms}|{name}".encode("utf-8")
     fields = ["v2", str(seal["index"]), seal.get("prevSealHash") or "-", seal["rootHash"], str(ms),
               seal["deviceKeyID"], seal.get("keyProtection") or "-", seal.get("previousKeyID") or "-", name]
@@ -118,10 +134,11 @@ def signed_payload(seal) -> bytes:
 
 
 def key_errors(i, seal, prev):
-    """Reglas de clave de ChainVerifier.keyErrors."""
-    if seal.get("signatureVersion") != 2:
-        if prev is not None and prev.get("signatureVersion") == 2:
-            return [f"Sello {i}: sello v1 después de uno v2 (formato sin firma de la cadena)"]
+    """Reglas de clave de ChainVerifier.keyErrors: la versión nunca baja y,
+    desde v2, keyID corresponde a la clave y los cambios de clave se declaran."""
+    if prev is not None and version(seal) < version(prev):
+        return [f"Sello {i}: sello v{version(seal)} después de uno v{version(prev)} (formato con menos campos firmados)"]
+    if version(seal) < 2:
         return []
     errors = []
     key_id = sha256_hex(base64.b64decode(seal.get("publicKeyDER", "")))[:16]
@@ -232,9 +249,9 @@ def verify(bundle_path: str):
     signatures_ok = False
     if CRYPTO_AVAILABLE:
         signatures_ok = True
-        for seal in seals:
+        for seal, raw in zip(seals, raw_lines):
             try:
-                if not verify_signature(seal, signed_payload(seal)):
+                if not verify_signature(seal, signed_payload(seal, raw)):
                     errors.append(f"Sello {seal.get('index')}: firma inválida")
                     signatures_ok = False
             except (KeyError, ValueError) as e:

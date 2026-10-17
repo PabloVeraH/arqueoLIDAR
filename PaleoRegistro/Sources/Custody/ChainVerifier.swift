@@ -127,10 +127,10 @@ public struct ChainVerifier: ChainVerifying {
             }
         }
 
-        // 5. Verificar firma criptográfica de cada sello (v1 o v2, ver `SealPayload`).
+        // 5. Verificar firma criptográfica de cada sello (v1, v2 o v3, ver `SealPayload`).
         for seal in seals {
-            let payload = SealPayload.bytes(for: seal)
             do {
+                let payload = try SealPayload.bytes(for: seal)
                 let pubKey = try P256.Signing.PublicKey(derRepresentation: seal.publicKeyDER)
                 let sig = try P256.Signing.ECDSASignature(derRepresentation: seal.signatureDER)
                 if !pubKey.isValidSignature(sig, for: payload) {
@@ -148,17 +148,17 @@ public struct ChainVerifier: ChainVerifying {
         }
     }
 
-    /// Reglas de clave para sellos v2: el keyID corresponde a la clave pública,
-    /// un cambio de clave va declarado (`previousKeyID`) y, después de un sello
-    /// v2, no se acepta uno v1, cuyo prevSealHash no está firmado.
+    /// Reglas de clave desde la firma v2: el keyID corresponde a la clave
+    /// pública y un cambio de clave va declarado (`previousKeyID`). Además, la
+    /// versión de firma nunca baja: un sello antiguo después de uno nuevo
+    /// tendría campos sin firmar.
     func keyErrors(_ seal: SealRecord, previous: SealRecord?) -> [CustodyError] {
         let i = seal.index
-        guard seal.signatureVersion == 2 else {
-            if previous?.signatureVersion == 2 {
-                return [.chainBroken(index: i, reason: "sello v1 después de uno v2 (formato sin firma de la cadena)")]
-            }
-            return []
+        let version = SealPayload.version(of: seal)
+        if let previous, version < SealPayload.version(of: previous) {
+            return [.chainBroken(index: i, reason: "sello v\(version) después de uno v\(SealPayload.version(of: previous)) (formato con menos campos firmados)")]
         }
+        guard version >= 2 else { return [] }
         var errors: [CustodyError] = []
         if seal.deviceKeyID != SealPayload.keyID(publicKeyDER: seal.publicKeyDER) {
             errors.append(.invalidSeal("Sello \(i): keyID no corresponde a su clave pública"))

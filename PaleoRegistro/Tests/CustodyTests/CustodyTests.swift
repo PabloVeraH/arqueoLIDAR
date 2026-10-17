@@ -151,13 +151,13 @@ struct SealSignerTests {
         #expect(seal.rootHash.count == 64)
 
         // Verificar que la firma es válida con la clave pública del sello
-        #expect(seal.signatureVersion == 2)
+        #expect(seal.signatureVersion == 3)
         #expect(seal.keyProtection == .software)
         #expect(seal.previousKeyID == nil)
-        let payload = SealPayload.bytes(for: seal)
-        let ms = CanonicalDateCoding.millisecondsSince1970(seal.wallClock)
-        #expect(String(decoding: payload, as: UTF8.self)
-            == "v2|0|-|\(seal.rootHash)|\(ms)|\(key.keyID)|software|-|Dr. Test")
+        let payload = try SealPayload.bytes(for: seal)
+        var unsigned = seal
+        unsigned.signatureDER = Data()
+        #expect(payload == (try CanonicalJSONEncoder().encode(unsigned)), "v3 firma el sello entero sin la firma")
         let pubKey = try P256.Signing.PublicKey(derRepresentation: seal.publicKeyDER)
         let sig = try P256.Signing.ECDSASignature(derRepresentation: seal.signatureDER)
         let valid = pubKey.isValidSignature(sig, for: payload)
@@ -390,7 +390,7 @@ struct SealV2Tests {
         seal.keyProtection = nil
         seal.signatureDER = try key.sign(data: SealPayload.bytes(for: seal))
         let ms = CanonicalDateCoding.millisecondsSince1970(seal.wallClock)
-        #expect(SealPayload.bytes(for: seal) == Data("\(seal.rootHash)|\(ms)|A|B".utf8))
+        #expect(try SealPayload.bytes(for: seal) == Data("\(seal.rootHash)|\(ms)|A|B".utf8))
         // Los campos nuevos en nil no se escriben: un sello v1 conserva sus bytes.
         let json = String(decoding: try CanonicalJSONEncoder().encode(seal), as: UTF8.self)
         #expect(!json.contains("signatureVersion") && !json.contains("keyProtection"))
@@ -477,6 +477,48 @@ struct SealV2Tests {
         try writeChain([s0], to: dir)
         let errs = try await errors(dir)
         #expect(errs.contains { if case .invalidSeal(let m) = $0 { m.contains("keyID") } else { false } })
+    }
+
+    @Test("v3: editar la lectura GPS del último sello rompe la firma; gnssTime viene del GPS")
+    func editingGeoOfLastSealIsDetected() async throws {
+        let dir = try bundle()
+        defer { try? FileManager.default.removeItem(at: dir) }
+        let key = SoftwareSigningKey()
+        let fixTime = Date(timeIntervalSince1970: 1_700_000_123.456)
+        let geo = try GeoFix(latitude: -22.893015, longitude: -69.319865, altitude: 1200,
+                             horizontalAccuracy: 4.5, verticalAccuracy: 6, timestamp: fixTime,
+                             source: .coreLocation)
+        var s0 = try await SealSigner().seal(bundleAt: dir, author: author, geo: geo, previousSeal: nil, key: key)
+        #expect(s0.gnssTime == fixTime)
+        try writeChain([s0], to: dir)
+        #expect(try await errors(dir).isEmpty)
+
+        // Mover el hallazgo 1 km: con v2 no se notaba en el último sello.
+        s0.geo?.latitude += 0.01
+        try writeChain([s0], to: dir)
+        let errs = try await errors(dir)
+        #expect(errs.contains { if case .invalidSeal(let m) = $0 { m.contains("Firma inválida") } else { false } },
+                "errores: \(errs)")
+    }
+
+    @Test("Un sello v2 (sin GPS firmado) sigue verificando, pero no puede venir después de uno v3")
+    func v2StillVerifiesButNotAfterV3() async throws {
+        let dir = try bundle()
+        defer { try? FileManager.default.removeItem(at: dir) }
+        let key = SoftwareSigningKey()
+        var s0 = try await SealSigner().seal(bundleAt: dir, author: author, geo: nil, previousSeal: nil, key: key)
+        s0.signatureVersion = 2
+        s0.signatureDER = try key.sign(data: SealPayload.bytes(for: s0))
+        try writeChain([s0], to: dir)
+        #expect(try await errors(dir).isEmpty)
+
+        let v3 = try await SealSigner().seal(bundleAt: dir, author: author, geo: nil, previousSeal: nil, key: key)
+        var s1 = try await SealSigner().seal(bundleAt: dir, author: author, geo: nil, previousSeal: v3, key: key)
+        s1.signatureVersion = 2
+        s1.signatureDER = try key.sign(data: SealPayload.bytes(for: s1))
+        try writeChain([v3, s1], to: dir)
+        let errs = try await errors(dir)
+        #expect(errs.contains { if case .chainBroken(index: 1, reason: _) = $0 { true } else { false } }, "errores: \(errs)")
     }
 
     @Test("La clave de software se guarda y recupera con la misma keyID")

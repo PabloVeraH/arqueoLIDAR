@@ -28,6 +28,7 @@ class Key:
         self.key_id = vc.sha256_hex(der)[:16]
 
     def sign(self, seal):
+        seal["signatureDER"] = ""  # v3 firma el sello con la firma vacía
         sig = self.priv.sign(vc.signed_payload(seal), ec.ECDSA(hashes.SHA256()))
         seal["signatureDER"] = base64.b64encode(sig).decode()
         return seal
@@ -42,7 +43,7 @@ def make_bundle():
     return d
 
 
-def new_seal(bundle, key, prev_seal=None, prev_line=None, version=2, ms_offset=0):
+def new_seal(bundle, key, prev_seal=None, prev_line=None, version=3, ms_offset=0):
     """Como SealSigner.seal: declara previousKeyID si la clave cambió."""
     manifest = vc.build_manifest(bundle)
     seal = {
@@ -56,8 +57,13 @@ def new_seal(bundle, key, prev_seal=None, prev_line=None, version=2, ms_offset=0
     }
     if prev_line is not None:
         seal["prevSealHash"] = vc.sha256_hex(prev_line)
-    if version == 2:
-        seal["signatureVersion"] = 2
+    if version >= 3:
+        seal["geo"] = {"latitude": -22.893015, "longitude": -69.319865, "altitude": 1200,
+                       "horizontalAccuracy": 4.5, "verticalAccuracy": 6,
+                       "timestamp": "2026-10-17T11:59:58.250Z", "source": "coreLocation"}
+        seal["gnssTime"] = "2026-10-17T11:59:58.250Z"
+    if version >= 2:
+        seal["signatureVersion"] = version
         seal["keyProtection"] = "software"
         if prev_seal is not None and prev_seal["deviceKeyID"] != key.key_id:
             seal["previousKeyID"] = prev_seal["deviceKeyID"]
@@ -75,7 +81,7 @@ def chain(bundle, keys, versions=None):
     """Cadena de sellos: uno por clave en `keys`."""
     seals, line = [], None
     for i, key in enumerate(keys):
-        v = versions[i] if versions else 2
+        v = versions[i] if versions else 3
         s = new_seal(bundle, key, seals[-1] if seals else None, line, version=v, ms_offset=i)
         seals.append(s)
         line = vc.canonical_json_bytes(s)
@@ -95,7 +101,21 @@ def main():
 
     b = make_bundle()
     write_chain(b, chain(b, [k1, k1]))
-    results.append(check("v2 íntegro", b, True))
+    results.append(check("v3 íntegro", b, True))
+
+    b = make_bundle()
+    write_chain(b, chain(b, [k1, k1], versions=[2, 2]))
+    results.append(check("v2 sigue verificando", b, True))
+
+    b = make_bundle()
+    s0, s1 = chain(b, [k1, k1])
+    s1["geo"]["latitude"] += 0.01
+    write_chain(b, [s0, s1])
+    results.append(check("v3: GPS editado en el último sello", b, False, "firma inválida"))
+
+    b = make_bundle()
+    write_chain(b, chain(b, [k1, k1], versions=[3, 2]))
+    results.append(check("v2 después de v3", b, False, "v2 después de uno v3"))
 
     b = make_bundle()
     write_chain(b, chain(b, [k1], versions=[1]))

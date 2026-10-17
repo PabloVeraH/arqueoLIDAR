@@ -22,30 +22,42 @@ public protocol SigningKey: Sendable {
 /// Bytes que se firman en cada sello. Compartido por `SealSigner`,
 /// `ChainVerifier` y replicado en `tools/verify_chain.py`.
 public enum SealPayload {
-    public static let currentVersion = 2
+    public static let currentVersion = 3
 
     /// keyID = primeros 16 hex del SHA-256 de la clave pública DER.
     public static func keyID(publicKeyDER: Data) -> String {
         SHA256.hash(data: publicKeyDER).compactMap { String(format: "%02x", $0) }.prefix(16).joined()
     }
 
+    /// Versión efectiva (nil = 1, sellos antiguos).
+    public static func version(of seal: SealRecord) -> Int { seal.signatureVersion ?? 1 }
+
     /// v1: `rootHash|ms|autor`. No cubre índice ni prevSealHash: quien borre un
     /// sello intermedio puede corregir el prevSealHash del siguiente sin romper
     /// ninguna firma. Solo se acepta para leer sellos antiguos.
     /// v2: `v2|índice|prevSealHash|rootHash|ms|keyID|protección|keyID anterior|autor`.
-    /// Campos ausentes como "-". El autor va al final: es el único campo que
-    /// puede contener "|", así el texto sigue siendo inequívoco.
-    public static func bytes(for seal: SealRecord) -> Data {
+    /// No cubre la fijación GPS ni su hora: en el último sello se podían editar.
+    /// v3: el JSON canónico del sello entero con `signatureDER` vacío. Cubre todo
+    /// lo que el sello dice. `verify_chain.py` lo reconstruye vaciando la firma en
+    /// la línea tal como está en disco, sin volver a formatear números.
+    public static func bytes(for seal: SealRecord) throws(CustodyError) -> Data {
         let ms = CanonicalDateCoding.millisecondsSince1970(seal.wallClock)
-        guard seal.signatureVersion == 2 else {
+        switch version(of: seal) {
+        case 1:
             return Data("\(seal.rootHash)|\(ms)|\(seal.author.name)".utf8)
+        case 2:
+            let fields = [
+                "v2", "\(seal.index)", seal.prevSealHash ?? "-", seal.rootHash, "\(ms)",
+                seal.deviceKeyID, seal.keyProtection?.rawValue ?? "-", seal.previousKeyID ?? "-",
+                seal.author.name,
+            ]
+            return Data(fields.joined(separator: "|").utf8)
+        default:
+            var unsigned = seal
+            unsigned.signatureDER = Data()
+            do { return try CanonicalJSONEncoder().encode(unsigned) }
+            catch { throw .invalidSeal("Sello \(seal.index) no codificable: \(error)") }
         }
-        let fields = [
-            "v2", "\(seal.index)", seal.prevSealHash ?? "-", seal.rootHash, "\(ms)",
-            seal.deviceKeyID, seal.keyProtection?.rawValue ?? "-", seal.previousKeyID ?? "-",
-            seal.author.name,
-        ]
-        return Data(fields.joined(separator: "|").utf8)
     }
 }
 
@@ -174,7 +186,8 @@ public struct SealSigner: Sendable {
             signatureDER: Data(),
             wallClock: clock,
             monotonicDeltaSincePrevious: delta,
-            gnssTime: nil,
+            // Segundo reloj, independiente del teléfono (plan §2.C.6). Firmado en v3.
+            gnssTime: geo?.timestamp,
             rfc3161Token: nil,
             signatureVersion: SealPayload.currentVersion,
             keyProtection: key.protection,
