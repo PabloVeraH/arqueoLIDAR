@@ -15,7 +15,38 @@ import Crypto
 public protocol SigningKey: Sendable {
     var publicKeyDER: Data { get }
     var keyID: String { get }
+    var protection: KeyProtection { get }
     func sign(data: Data) throws(CustodyError) -> Data
+}
+
+/// Bytes que se firman en cada sello. Compartido por `SealSigner`,
+/// `ChainVerifier` y replicado en `tools/verify_chain.py`.
+public enum SealPayload {
+    public static let currentVersion = 2
+
+    /// keyID = primeros 16 hex del SHA-256 de la clave pública DER.
+    public static func keyID(publicKeyDER: Data) -> String {
+        SHA256.hash(data: publicKeyDER).compactMap { String(format: "%02x", $0) }.prefix(16).joined()
+    }
+
+    /// v1: `rootHash|ms|autor`. No cubre índice ni prevSealHash: quien borre un
+    /// sello intermedio puede corregir el prevSealHash del siguiente sin romper
+    /// ninguna firma. Solo se acepta para leer sellos antiguos.
+    /// v2: `v2|índice|prevSealHash|rootHash|ms|keyID|protección|keyID anterior|autor`.
+    /// Campos ausentes como "-". El autor va al final: es el único campo que
+    /// puede contener "|", así el texto sigue siendo inequívoco.
+    public static func bytes(for seal: SealRecord) -> Data {
+        let ms = CanonicalDateCoding.millisecondsSince1970(seal.wallClock)
+        guard seal.signatureVersion == 2 else {
+            return Data("\(seal.rootHash)|\(ms)|\(seal.author.name)".utf8)
+        }
+        let fields = [
+            "v2", "\(seal.index)", seal.prevSealHash ?? "-", seal.rootHash, "\(ms)",
+            seal.deviceKeyID, seal.keyProtection?.rawValue ?? "-", seal.previousKeyID ?? "-",
+            seal.author.name,
+        ]
+        return Data(fields.joined(separator: "|").utf8)
+    }
 }
 
 /// Clave de software P-256 para testing y CI. No usa Secure Enclave.
@@ -27,19 +58,30 @@ public struct SoftwareSigningKey: SigningKey, Sendable {
     public let keyID: String
     private let box: _KeyBox
 
+    public var protection: KeyProtection { .software }
+    /// Para guardar la clave en el llavero y reusarla entre arranques.
+    public var rawRepresentation: Data { box.key.rawRepresentation }
+
     private final class _KeyBox: @unchecked Sendable {
         let key: P256.Signing.PrivateKey
         init(_ key: P256.Signing.PrivateKey) { self.key = key }
     }
 
     public init() {
-        let key = P256.Signing.PrivateKey()
+        self.init(key: P256.Signing.PrivateKey())
+    }
+
+    public init(rawRepresentation: Data) throws(CustodyError) {
+        let key: P256.Signing.PrivateKey
+        do { key = try P256.Signing.PrivateKey(rawRepresentation: rawRepresentation) }
+        catch { throw .signingFailed("Clave guardada ilegible: \(error.localizedDescription)") }
+        self.init(key: key)
+    }
+
+    private init(key: P256.Signing.PrivateKey) {
         self.box = _KeyBox(key)
         self.publicKeyDER = key.publicKey.derRepresentation
-        self.keyID = SHA256.hash(data: key.publicKey.derRepresentation)
-            .compactMap { String(format: "%02x", $0) }
-            .prefix(16)
-            .joined()
+        self.keyID = SealPayload.keyID(publicKeyDER: key.publicKey.derRepresentation)
     }
 
     public func sign(data: Data) throws(CustodyError) -> Data {
@@ -108,17 +150,7 @@ public struct SealSigner: Sendable {
             prevHash = nil
         }
 
-        // 4. Payload a firmar: rootHash + timestamp (ms enteros, no Double) + author.
-        // Un entero de milisegundos evita cualquier ambigüedad de redondeo de
-        // punto flotante entre lo firmado y lo que se recupera al decodificar
-        // el sello desde chain.jsonl.
-        let payloadString = "\(rootHash)|\(clockMillis)|\(author.name)"
-        let payload = payloadString.data(using: .utf8)!
-
-        // 5. Firmar
-        let signature = try key.sign(data: payload)
-
-        // 6. Delta monótono desde sello anterior
+        // 4. Delta monótono desde sello anterior
         let delta: TimeInterval?
         if let prev = previousSeal {
             delta = clock.timeIntervalSince(prev.wallClock)
@@ -126,7 +158,11 @@ public struct SealSigner: Sendable {
             delta = nil
         }
 
-        return SealRecord(
+        // 5. Rotación: si la clave cambió respecto del sello anterior, este sello
+        // declara cuál era. Va dentro de lo firmado (v2).
+        let previousKeyID = previousSeal.flatMap { $0.deviceKeyID == key.keyID ? nil : $0.deviceKeyID }
+
+        var record = SealRecord(
             index: (previousSeal?.index ?? -1) + 1,
             prevSealHash: prevHash,
             rootHash: rootHash,
@@ -135,11 +171,18 @@ public struct SealSigner: Sendable {
             author: author,
             deviceKeyID: key.keyID,
             publicKeyDER: key.publicKeyDER,
-            signatureDER: signature,
+            signatureDER: Data(),
             wallClock: clock,
             monotonicDeltaSincePrevious: delta,
             gnssTime: nil,
-            rfc3161Token: nil
+            rfc3161Token: nil,
+            signatureVersion: SealPayload.currentVersion,
+            keyProtection: key.protection,
+            previousKeyID: previousKeyID
         )
+
+        // 6. Firmar (milisegundos enteros en el payload, ver `CanonicalDateCoding`).
+        record.signatureDER = try key.sign(data: SealPayload.bytes(for: record))
+        return record
     }
 }

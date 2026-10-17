@@ -31,9 +31,16 @@ Formato que replica (ver PaleoRegistro/Sources):
     mismos bytes del sello anterior.
   - rootHash = SHA-256 del JSON canónico de la lista de FileDigest
     (claves ordenadas, sin espacios, UTF-8).
-  - Payload firmado = "<rootHash>|<wallClock en milisegundos Unix enteros>|<author.name>".
-    wallClock se guarda como ISO 8601 UTC con milisegundos
-    ("2026-08-15T02:27:16.407Z").
+  - Payload firmado (ver SealPayload en Custody/SealSigner.swift):
+      v2 (signatureVersion = 2):
+        "v2|<index>|<prevSealHash o ->|<rootHash>|<ms>|<deviceKeyID>|<keyProtection o ->|<previousKeyID o ->|<author.name>"
+      v1 (sellos antiguos, sin signatureVersion):
+        "<rootHash>|<ms>|<author.name>"
+    <ms> = wallClock en milisegundos Unix enteros; wallClock se guarda como
+    ISO 8601 UTC con milisegundos ("2026-08-15T02:27:16.407Z").
+  - Reglas de clave (solo sellos v2): deviceKeyID = 16 primeros hex del
+    SHA-256 de publicKeyDER; si la clave cambia respecto del sello anterior,
+    previousKeyID declara la anterior; tras un sello v2 no se acepta uno v1.
 """
 
 import base64
@@ -97,6 +104,36 @@ def wall_clock_millis(value) -> int:
         # Formato antiguo: segundos desde 2001-01-01 (Codable por defecto de Date).
         return int(round((float(value) + APPLE_REFERENCE_EPOCH) * 1000))
     raise ValueError(f"wallClock con tipo inesperado: {type(value).__name__}")
+
+
+def signed_payload(seal) -> bytes:
+    """Bytes firmados, igual que SealPayload.bytes(for:) en la app."""
+    ms = wall_clock_millis(seal["wallClock"])
+    name = seal["author"]["name"]
+    if seal.get("signatureVersion") != 2:
+        return f"{seal['rootHash']}|{ms}|{name}".encode("utf-8")
+    fields = ["v2", str(seal["index"]), seal.get("prevSealHash") or "-", seal["rootHash"], str(ms),
+              seal["deviceKeyID"], seal.get("keyProtection") or "-", seal.get("previousKeyID") or "-", name]
+    return "|".join(fields).encode("utf-8")
+
+
+def key_errors(i, seal, prev):
+    """Reglas de clave de ChainVerifier.keyErrors."""
+    if seal.get("signatureVersion") != 2:
+        if prev is not None and prev.get("signatureVersion") == 2:
+            return [f"Sello {i}: sello v1 después de uno v2 (formato sin firma de la cadena)"]
+        return []
+    errors = []
+    key_id = sha256_hex(base64.b64decode(seal.get("publicKeyDER", "")))[:16]
+    if seal.get("deviceKeyID") != key_id:
+        errors.append(f"Sello {i}: keyID no corresponde a su clave pública")
+    expected = None
+    if prev is not None and prev.get("deviceKeyID") != seal.get("deviceKeyID"):
+        expected = prev.get("deviceKeyID")
+    if seal.get("previousKeyID") != expected:
+        errors.append(f"Sello {i}: " + ("cambio de clave no declarado" if expected
+                                         else "declara un cambio de clave que no ocurrió"))
+    return errors
 
 
 def verify_signature(seal, payload: bytes) -> bool:
@@ -165,6 +202,7 @@ def verify(bundle_path: str):
                 errors.append("Sello 0 no debería tener prevSealHash")
         elif seal.get("prevSealHash") != sha256_hex(raw_lines[i - 1]):
             errors.append(f"Sello {i}: prevSealHash no encadena con el sello {i - 1}")
+        errors += key_errors(i, seal, seals[i - 1] if i > 0 else None)
 
     # 2. Cada sello: su rootHash debe corresponder a su propio manifiesto.
     for i, seal in enumerate(seals):
@@ -196,9 +234,7 @@ def verify(bundle_path: str):
         signatures_ok = True
         for seal in seals:
             try:
-                ms = wall_clock_millis(seal["wallClock"])
-                payload = f"{seal['rootHash']}|{ms}|{seal['author']['name']}".encode("utf-8")
-                if not verify_signature(seal, payload):
+                if not verify_signature(seal, signed_payload(seal)):
                     errors.append(f"Sello {seal.get('index')}: firma inválida")
                     signatures_ok = False
             except (KeyError, ValueError) as e:

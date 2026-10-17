@@ -68,6 +68,10 @@ public struct ChainVerifier: ChainVerifying {
         for i in 0..<seals.count {
             let seal = seals[i]
 
+            if seal.index != i {
+                errors.append(.chainBroken(index: i, reason: "índice \(seal.index) fuera de orden"))
+            }
+
             // prevSealHash
             if i == 0 {
                 if seal.prevSealHash != nil {
@@ -85,6 +89,8 @@ public struct ChainVerifier: ChainVerifying {
                     errors.append(.chainBroken(index: i, reason: "error al hashear sello anterior"))
                 }
             }
+
+            errors += keyErrors(seal, previous: i > 0 ? seals[i - 1] : nil)
         }
 
         // 4. Verificar integridad de archivos contra el último manifiesto
@@ -121,17 +127,9 @@ public struct ChainVerifier: ChainVerifying {
             }
         }
 
-        // 5. Verificar firma criptográfica de cada sello
-        // El payload usa milisegundos enteros (no el Double crudo de
-        // `timeIntervalSince1970`) — debe coincidir exactamente con la
-        // convención de `SealSigner.seal`, ver `CanonicalDateCoding`.
+        // 5. Verificar firma criptográfica de cada sello (v1 o v2, ver `SealPayload`).
         for seal in seals {
-            let payloadString = "\(seal.rootHash)|\(CanonicalDateCoding.millisecondsSince1970(seal.wallClock))|\(seal.author.name)"
-            guard let payload = payloadString.data(using: .utf8) else {
-                errors.append(.invalidSeal("Payload no codificable en sello \(seal.index)"))
-                continue
-            }
-
+            let payload = SealPayload.bytes(for: seal)
             do {
                 let pubKey = try P256.Signing.PublicKey(derRepresentation: seal.publicKeyDER)
                 let sig = try P256.Signing.ECDSASignature(derRepresentation: seal.signatureDER)
@@ -148,5 +146,29 @@ public struct ChainVerifier: ChainVerifying {
         } else {
             return .invalid(errors)
         }
+    }
+
+    /// Reglas de clave para sellos v2: el keyID corresponde a la clave pública,
+    /// un cambio de clave va declarado (`previousKeyID`) y, después de un sello
+    /// v2, no se acepta uno v1, cuyo prevSealHash no está firmado.
+    func keyErrors(_ seal: SealRecord, previous: SealRecord?) -> [CustodyError] {
+        let i = seal.index
+        guard seal.signatureVersion == 2 else {
+            if previous?.signatureVersion == 2 {
+                return [.chainBroken(index: i, reason: "sello v1 después de uno v2 (formato sin firma de la cadena)")]
+            }
+            return []
+        }
+        var errors: [CustodyError] = []
+        if seal.deviceKeyID != SealPayload.keyID(publicKeyDER: seal.publicKeyDER) {
+            errors.append(.invalidSeal("Sello \(i): keyID no corresponde a su clave pública"))
+        }
+        let expected = previous.flatMap { $0.deviceKeyID == seal.deviceKeyID ? nil : $0.deviceKeyID }
+        if seal.previousKeyID != expected {
+            errors.append(.chainBroken(index: i, reason: expected == nil
+                ? "declara un cambio de clave que no ocurrió"
+                : "cambio de clave no declarado"))
+        }
+        return errors
     }
 }

@@ -205,14 +205,23 @@ private enum VerifyTemplate {
         QUÉ PRUEBA LA FIRMA
         --------------------
         - Integridad de los archivos desde el momento del sellado.
-        - Origen en un dispositivo iPhone con biometría del operador presente.
         - No se ha modificado ningún archivo después del sellado.
+        - El orden de los sellos: cada firma (formato v2) cubre su número y el
+          hash del sello anterior; borrar o intercalar un sello rompe la firma.
+        - Si el sello dice keyProtection = "secureEnclave": la clave vive en el
+          chip seguro de un iPhone, no se puede copiar, y sellar exigió Face ID
+          o el código de ese iPhone.
+        - Si dice "software": la clave no está en el chip seguro. Prueba
+          integridad, pero prueba menos sobre qué dispositivo selló.
+        - Un cambio de clave (teléfono nuevo) queda declarado en previousKeyID.
 
         QUÉ NO PRUEBA
         -------------
         - Fecha absoluta confiable (el reloj del dispositivo es manipulable).
         - Ausencia de manipulación física de la escena antes de la captura.
         - Autoría profesional certificada por una autoridad externa.
+        - Quién sostenía el iPhone: Face ID o el código prueban que se
+          desbloqueó, no la identidad del operador declarado.
 
         CÓMO VERIFICAR
         --------------
@@ -220,6 +229,10 @@ private enum VerifyTemplate {
         2. Ejecutar:  shasum -a 256 scans/*/mesh.ply
         3. Comparar cada hash con el manifiesto en seals/chain.jsonl.
         4. Verificar que los hashes encadenados (prevSealHash) son consistentes.
+        Verificación completa, incluidas las firmas (pide Python 3):
+           pip install cryptography
+           python3 verify_chain.py <esta carpeta>
+        (verify_chain.py está en la carpeta tools/ del proyecto PaleoRegistro.)
 
         HASH RAÍZ DEL EXPEDIENTE
         ------------------------

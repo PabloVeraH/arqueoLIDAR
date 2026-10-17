@@ -410,6 +410,14 @@ public struct SealRecord: Sendable, Codable, Equatable {
     public var monotonicDeltaSincePrevious: TimeInterval?
     public var gnssTime: Date?
     public var rfc3161Token: Data?
+    /// nil = firma v1 (`rootHash|ms|autor`, sellos antiguos). 2 = firma v2, que
+    /// cubre también índice, prevSealHash, clave y rotación (ver `SealPayload`).
+    public var signatureVersion: Int?
+    /// Dónde vive la clave que firmó. nil en sellos v1 (clave de software).
+    public var keyProtection: KeyProtection?
+    /// Rotación de clave: keyID del sello anterior cuando este sello firma con
+    /// otra clave (teléfono nuevo, clave perdida). Firmado en v2.
+    public var previousKeyID: String?
 
     public init(
         index: Int,
@@ -424,7 +432,10 @@ public struct SealRecord: Sendable, Codable, Equatable {
         wallClock: Date,
         monotonicDeltaSincePrevious: TimeInterval?,
         gnssTime: Date?,
-        rfc3161Token: Data?
+        rfc3161Token: Data?,
+        signatureVersion: Int? = nil,
+        keyProtection: KeyProtection? = nil,
+        previousKeyID: String? = nil
     ) {
         self.index = index
         self.prevSealHash = prevSealHash
@@ -439,7 +450,18 @@ public struct SealRecord: Sendable, Codable, Equatable {
         self.monotonicDeltaSincePrevious = monotonicDeltaSincePrevious
         self.gnssTime = gnssTime
         self.rfc3161Token = rfc3161Token
+        self.signatureVersion = signatureVersion
+        self.keyProtection = keyProtection
+        self.previousKeyID = previousKeyID
     }
+}
+
+/// `secureEnclave`: clave no exportable en el chip seguro; sellar exige Face ID
+/// o el código del iPhone. `software`: clave guardada en el llavero sin chip
+/// seguro (simulador o iPhone sin código); prueba menos y el sello lo declara.
+public enum KeyProtection: String, Sendable, Codable, Equatable {
+    case secureEnclave
+    case software
 }
 
 public enum CustodyVerdict: Sendable, Equatable {

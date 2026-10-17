@@ -151,10 +151,16 @@ struct SealSignerTests {
         #expect(seal.rootHash.count == 64)
 
         // Verificar que la firma es válida con la clave pública del sello
-        let payload = "\(seal.rootHash)|\(CanonicalDateCoding.millisecondsSince1970(seal.wallClock))|Dr. Test"
+        #expect(seal.signatureVersion == 2)
+        #expect(seal.keyProtection == .software)
+        #expect(seal.previousKeyID == nil)
+        let payload = SealPayload.bytes(for: seal)
+        let ms = CanonicalDateCoding.millisecondsSince1970(seal.wallClock)
+        #expect(String(decoding: payload, as: UTF8.self)
+            == "v2|0|-|\(seal.rootHash)|\(ms)|\(key.keyID)|software|-|Dr. Test")
         let pubKey = try P256.Signing.PublicKey(derRepresentation: seal.publicKeyDER)
         let sig = try P256.Signing.ECDSASignature(derRepresentation: seal.signatureDER)
-        let valid = pubKey.isValidSignature(sig, for: payload.data(using: .utf8)!)
+        let valid = pubKey.isValidSignature(sig, for: payload)
         #expect(valid, "La firma del sello no verifica contra su propia clave pública")
     }
 
@@ -341,5 +347,143 @@ extension Data {
         } else {
             try write(to: url)
         }
+    }
+}
+
+@Suite("F10 Custody: firma v2 y rotación de clave")
+struct SealV2Tests {
+
+    // El "|" en el nombre prueba que el payload v2 sigue siendo inequívoco.
+    let author = AuthorIdentity(name: "A|B", role: "R", institution: "I")
+
+    func bundle() throws -> URL {
+        let dir = tempBundleDir(name: "v2")
+        let scans = dir.appendingPathComponent("scans/s")
+        try FileManager.default.createDirectory(at: scans, withIntermediateDirectories: true)
+        try Data("mesh".utf8).write(to: scans.appendingPathComponent("mesh.ply"))
+        try FileManager.default.createDirectory(at: dir.appendingPathComponent("seals"), withIntermediateDirectories: true)
+        return dir
+    }
+
+    func writeChain(_ seals: [SealRecord], to dir: URL) throws {
+        var data = Data()
+        for seal in seals { data += try CanonicalJSONEncoder().encode(seal) + Data("\n".utf8) }
+        try data.write(to: dir.appendingPathComponent("seals/chain.jsonl"))
+    }
+
+    func hash(_ seal: SealRecord) throws -> String {
+        SHA256.hash(data: try CanonicalJSONEncoder().encode(seal)).map { String(format: "%02x", $0) }.joined()
+    }
+
+    func errors(_ dir: URL) async throws -> [CustodyError] {
+        if case .invalid(let e) = try await ChainVerifier().verify(bundleAt: dir) { return e }
+        return []
+    }
+
+    @Test("Sello v1 antiguo (sin signatureVersion) sigue verificando")
+    func legacyV1StillVerifies() async throws {
+        let dir = try bundle()
+        defer { try? FileManager.default.removeItem(at: dir) }
+        let key = SoftwareSigningKey()
+        var seal = try await SealSigner().seal(bundleAt: dir, author: author, geo: nil, previousSeal: nil, key: key)
+        seal.signatureVersion = nil
+        seal.keyProtection = nil
+        seal.signatureDER = try key.sign(data: SealPayload.bytes(for: seal))
+        let ms = CanonicalDateCoding.millisecondsSince1970(seal.wallClock)
+        #expect(SealPayload.bytes(for: seal) == Data("\(seal.rootHash)|\(ms)|A|B".utf8))
+        // Los campos nuevos en nil no se escriben: un sello v1 conserva sus bytes.
+        let json = String(decoding: try CanonicalJSONEncoder().encode(seal), as: UTF8.self)
+        #expect(!json.contains("signatureVersion") && !json.contains("keyProtection"))
+        try writeChain([seal], to: dir)
+        #expect(try await errors(dir).isEmpty)
+    }
+
+    @Test("Borrar un sello intermedio y corregir prevSealHash rompe la firma v2")
+    func deletingMiddleSealAndPatchingHashIsDetected() async throws {
+        let dir = try bundle()
+        defer { try? FileManager.default.removeItem(at: dir) }
+        let key = SoftwareSigningKey()
+        let signer = SealSigner()
+        let s0 = try await signer.seal(bundleAt: dir, author: author, geo: nil, previousSeal: nil, key: key)
+        let s1 = try await signer.seal(bundleAt: dir, author: author, geo: nil, previousSeal: s0, key: key)
+        var s2 = try await signer.seal(bundleAt: dir, author: author, geo: nil, previousSeal: s1, key: key)
+        try writeChain([s0, s1, s2], to: dir)
+        #expect(try await errors(dir).isEmpty)
+
+        // Ataque: quitar s1, renumerar s2 y hacerlo apuntar a s0. Sin la clave no
+        // se puede volver a firmar, así que la firma de s2 deja de verificar.
+        s2.index = 1
+        s2.prevSealHash = try hash(s0)
+        try writeChain([s0, s2], to: dir)
+        let errs = try await errors(dir)
+        #expect(errs.contains { if case .invalidSeal(let m) = $0 { m.contains("Firma inválida") } else { false } },
+                "errores: \(errs)")
+    }
+
+    @Test("Cambio de clave declarado verifica; previousKeyID es la clave anterior")
+    func declaredRotationVerifies() async throws {
+        let dir = try bundle()
+        defer { try? FileManager.default.removeItem(at: dir) }
+        let oldKey = SoftwareSigningKey(), newKey = SoftwareSigningKey()
+        let signer = SealSigner()
+        let s0 = try await signer.seal(bundleAt: dir, author: author, geo: nil, previousSeal: nil, key: oldKey)
+        let s1 = try await signer.seal(bundleAt: dir, author: author, geo: nil, previousSeal: s0, key: newKey)
+        let s2 = try await signer.seal(bundleAt: dir, author: author, geo: nil, previousSeal: s1, key: newKey)
+        #expect(s1.previousKeyID == oldKey.keyID)
+        #expect(s2.previousKeyID == nil)
+        try writeChain([s0, s1, s2], to: dir)
+        #expect(try await errors(dir).isEmpty)
+    }
+
+    @Test("Cambio de clave sin declarar se detecta aunque la firma sea válida")
+    func undeclaredRotationIsDetected() async throws {
+        let dir = try bundle()
+        defer { try? FileManager.default.removeItem(at: dir) }
+        let oldKey = SoftwareSigningKey(), newKey = SoftwareSigningKey()
+        let signer = SealSigner()
+        let s0 = try await signer.seal(bundleAt: dir, author: author, geo: nil, previousSeal: nil, key: oldKey)
+        var s1 = try await signer.seal(bundleAt: dir, author: author, geo: nil, previousSeal: s0, key: newKey)
+        s1.previousKeyID = nil
+        s1.signatureDER = try newKey.sign(data: SealPayload.bytes(for: s1))
+        try writeChain([s0, s1], to: dir)
+        let errs = try await errors(dir)
+        #expect(errs.contains { if case .chainBroken(index: 1, reason: let r) = $0 { r.contains("no declarado") } else { false } },
+                "errores: \(errs)")
+    }
+
+    @Test("Un sello v1 después de uno v2 se rechaza")
+    func downgradeToV1IsRejected() async throws {
+        let dir = try bundle()
+        defer { try? FileManager.default.removeItem(at: dir) }
+        let key = SoftwareSigningKey()
+        let signer = SealSigner()
+        let s0 = try await signer.seal(bundleAt: dir, author: author, geo: nil, previousSeal: nil, key: key)
+        var s1 = try await signer.seal(bundleAt: dir, author: author, geo: nil, previousSeal: s0, key: key)
+        s1.signatureVersion = nil
+        s1.signatureDER = try key.sign(data: SealPayload.bytes(for: s1))
+        try writeChain([s0, s1], to: dir)
+        let errs = try await errors(dir)
+        #expect(errs.contains { if case .chainBroken(index: 1, reason: _) = $0 { true } else { false } }, "errores: \(errs)")
+    }
+
+    @Test("keyID que no corresponde a la clave pública se rechaza")
+    func keyIDMismatchIsRejected() async throws {
+        let dir = try bundle()
+        defer { try? FileManager.default.removeItem(at: dir) }
+        let key = SoftwareSigningKey()
+        var s0 = try await SealSigner().seal(bundleAt: dir, author: author, geo: nil, previousSeal: nil, key: key)
+        s0.deviceKeyID = "0000000000000000"
+        s0.signatureDER = try key.sign(data: SealPayload.bytes(for: s0))
+        try writeChain([s0], to: dir)
+        let errs = try await errors(dir)
+        #expect(errs.contains { if case .invalidSeal(let m) = $0 { m.contains("keyID") } else { false } })
+    }
+
+    @Test("La clave de software se guarda y recupera con la misma keyID")
+    func softwareKeyRoundTrip() throws {
+        let key = SoftwareSigningKey()
+        let restored = try SoftwareSigningKey(rawRepresentation: key.rawRepresentation)
+        #expect(restored.keyID == key.keyID)
+        #expect(restored.publicKeyDER == key.publicKeyDER)
     }
 }
