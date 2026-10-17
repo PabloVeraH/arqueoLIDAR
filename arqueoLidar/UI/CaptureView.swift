@@ -31,6 +31,14 @@ struct CaptureView: View {
                 VStack(spacing: 12) {
                     hud
                     Spacer()
+                    ForEach(warnings, id: \.self) { warning in
+                        Label(warning, systemImage: "exclamationmark.triangle.fill")
+                            .font(.footnote.weight(.semibold))
+                            .foregroundStyle(.white)
+                            .padding(10)
+                            .frame(maxWidth: .infinity, alignment: .leading)
+                            .background(Color.orange.opacity(0.9), in: RoundedRectangle(cornerRadius: 12))
+                    }
                     if let noise = controller.noiseResult {
                         Text(noise)
                             .font(.footnote.monospacedDigit())
@@ -106,6 +114,7 @@ struct CaptureView: View {
             Text("Temperatura: \(controller.thermalText) · Disco libre: \(controller.freeDiskText)")
             Text(location.statusText)
             Text(markText)
+            Text("Tiempo: \(Int(Date().timeIntervalSince(controller.sessionStart) / 60)) min · Recorrido: \(Int(controller.pathLength)) m")
         }
         .font(.caption.monospacedDigit())
         .padding(10)
@@ -143,7 +152,7 @@ struct CaptureView: View {
                     .frame(maxWidth: .infinity)
             }
             .buttonStyle(.borderedProminent)
-            .disabled(controller.vertexCount == 0 || isSaving)
+            .disabled(controller.vertexCount == 0 || isSaving || controller.lowDisk)
         }
         .buttonStyle(.bordered)
         .controlSize(.large)
@@ -205,6 +214,24 @@ struct CaptureView: View {
         .interactiveDismissDisabled(isSaving)
     }
 
+    /// Avisos que no deben pasar inadvertidos durante la captura.
+    private var warnings: [String] {
+        var out: [String] = []
+        if controller.isInterrupted {
+            out.append("Captura interrumpida (llamada o bloqueo). Al volver, apunta a una zona ya escaneada para que la app se reubique.")
+        } else if controller.interruptions > 0 {
+            out.append("Hubo \(controller.interruptions) interrupción(es): revisa en el visor que el modelo no quedó corrido.")
+        }
+        if controller.sunWarning {
+            out.append("Mucha luz: el LiDAR está perdiendo puntos. Haz sombra con el cuerpo o un paraguas, o escanea más cerca.")
+        }
+        if controller.lowDisk {
+            out.append("Queda poco espacio (\(controller.freeDiskText)). Libera espacio en el iPhone antes de guardar.")
+        }
+        out += controller.qualityReport().flags.filter { $0.hasPrefix("Escaneo largo") || $0.hasPrefix("Recorrido largo") }
+        return out
+    }
+
     private var markText: String {
         controller.objectMark.map { "Objeto marcado · radio \(radiusText($0.radius))" }
             ?? "Objeto sin marcar (apunta la mira y toca «Marcar»)"
@@ -215,15 +242,14 @@ struct CaptureView: View {
     }
 
     private func save() {
-        let parts = controller.collectParts()
-        let fixes = location.fixes
-        let mark = controller.objectMark
+        let capture = CaptureRecord(parts: controller.collectParts(), fixes: location.fixes, purpose: purpose,
+                                    mark: controller.objectMark, trajectory: controller.trajectory,
+                                    quality: controller.qualityReport())
         isSaving = true
         controller.pause()
         Task {
             do {
-                let result = try await FieldStore.saveScan(parts: parts, fixes: fixes, purpose: purpose,
-                                                         mark: mark, finding: finding, replacing: replacing,
+                let result = try await FieldStore.saveScan(capture, finding: finding, replacing: replacing,
                                                          reason: reason.trimmingCharacters(in: .whitespacesAndNewlines))
                 location.stop()
                 showSaveForm = false

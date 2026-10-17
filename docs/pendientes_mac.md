@@ -190,6 +190,22 @@ capas de arena, ensayo nulo, etc.), a la sombra y al sol, y anotar cada corrida 
 **Bien si:** el resumen dice OK en todas las filas. Puede tomar varias jornadas: avanza
 por magnitud y sube la planilla cada vez.
 
+### M15 · 2026-10-17 · Robustez de la captura (Fase 15)
+`swift test` (QualityReportTests en DomainTests; "Lo que no alcanzó a sellarse…" en
+CustodyTests). Compila; riesgos: `ScanController.lowConfidenceFraction` (CVPixelBuffer),
+`WireframeRenderer.onInterruption` (callback de ARKit que salta al actor principal) y
+`CaptureRecord`. En el iPhone:
+1. Durante una captura, recibe una llamada o bloquea el teléfono y vuelve: aparece el
+   aviso; al apuntar a lo ya escaneado, la malla sigue ahí. Guarda: la ficha muestra
+   "Hubo 1 interrupción…" en "Calidad de la captura".
+2. Escanea al sol de mediodía: ¿aparece "Mucha luz…"? Anota cuándo sí y cuándo no, y
+   ajusta `sunLowConfidenceFraction` / `sunAmbientIntensity` si hace falta.
+3. Cierra la app a la fuerza justo después de tocar "Guardar y sellar" (antes de que
+   termine). Al reabrir el hallazgo: aviso "Se apartaron…" y Verificar → Íntegro;
+   la carpeta queda en `Recuperados/`.
+4. El HUD muestra tiempo y recorrido; pasado el límite, aparece el aviso.
+**Bien si:** todo lo anterior. Anota tiempos y umbrales observados en `registro_pruebas.md`.
+
 ## Resueltas
 
 _(vacío)_

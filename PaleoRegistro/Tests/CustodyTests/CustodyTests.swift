@@ -565,6 +565,28 @@ struct SealHistoryTests {
         #expect(changes[2].removed == ["measurements/MSR-1.json"])
     }
 
+    @Test("Lo que no alcanzó a sellarse se detecta como elemento completo")
+    func unsealedItemsAfterInterruptedSave() async throws {
+        let dir = tempBundleDir(name: "orphans")
+        defer { try? FileManager.default.removeItem(at: dir) }
+        let fm = FileManager.default
+        for sub in ["seals", "scans/A", "scans/B/specimens", "measurements"] {
+            try fm.createDirectory(at: dir.appendingPathComponent(sub), withIntermediateDirectories: true)
+        }
+        try Data("a".utf8).write(to: dir.appendingPathComponent("scans/A/mesh.ply"))
+        let seal = try await SealSigner().seal(bundleAt: dir, author: AuthorIdentity(name: "A", role: "R", institution: "I"),
+                                               geo: nil, previousSeal: nil, key: SoftwareSigningKey())
+        try (CanonicalJSONEncoder().encode(seal) + Data("\n".utf8)).write(to: dir.appendingPathComponent("seals/chain.jsonl"))
+        // Guardado cortado: escaneo B y una medición escritos, sin sello.
+        try Data("b".utf8).write(to: dir.appendingPathComponent("scans/B/mesh.ply"))
+        try Data("b".utf8).write(to: dir.appendingPathComponent("scans/B/specimens/s.ply"))
+        try Data("m".utf8).write(to: dir.appendingPathComponent("measurements/MSR-2.json"))
+        // Archivo agregado dentro de un escaneo SELLADO: no se aparta el escaneo.
+        try Data("x".utf8).write(to: dir.appendingPathComponent("scans/A/agregado.txt"))
+
+        #expect(SealHistory.unsealedItems(bundleAt: dir) == ["measurements/MSR-2.json", "scans/B"])
+    }
+
     @Test("Sin chain.jsonl el historial está vacío")
     func emptyWithoutChain() {
         #expect(SealHistory.read(bundleAt: tempBundleDir(name: "nochain")).isEmpty)

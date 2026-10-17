@@ -35,6 +35,9 @@ Sitios → Hallazgos del sitio → Ficha del hallazgo → Escaneo → Visor 3D y
 
 - Se escanea con la **cámara y el LiDAR**, viendo la malla 3D en vivo sobre la imagen, mientras el **GPS** registra todas sus lecturas.
 - Un panel muestra si el seguimiento es bueno, la temperatura del teléfono y el espacio libre.
+- El panel muestra también el **tiempo y los metros recorridos**, y avisa si el escaneo se hace demasiado largo (el seguimiento se va desviando), si hay **mucha luz** (el sol directo hace que el LiDAR pierda puntos: conviene hacer sombra), si hubo una **interrupción** (llamada o bloqueo) o si queda **poco espacio** en el teléfono.
+- Cada escaneo guarda un **informe de calidad** que se ve en su ficha: duración, recorrido y cualquier advertencia. Los límites son provisorios hasta las pruebas de terreno.
+- Si la app se cierra mientras guarda, lo que no alcanzó a sellarse se aparta a la carpeta `Recuperados/` y el expediente sigue íntegro.
 - El botón "Medir ruido" indica cuánto tiembla la medición sobre una pared plana, en milímetros.
 - El botón **"Marcar"** deja anotado cuál es el objeto: se apunta la mira al hueso o pieza, se elige un radio aproximado (25 cm a 2 m) y queda guardado con el escaneo. Conviene escanear **solo el objeto y una franja de suelo alrededor**: todo lo que la cámara ve entra en el modelo.
 - Al guardar se elige el **propósito** (registro inicial, monitoreo, evaluación de daño, rescate…) y el escaneo se **sella**. Antes de guardar, el iPhone pide **Face ID o su código**: la firma se hace con una clave guardada en el **chip seguro** del teléfono, que no se puede copiar. Si se cancela Face ID, no se guarda nada y el escaneo sigue en pantalla para volver a intentarlo. Si el GPS fue malo, queda marcado "GPS degradado" o "Sin GPS".

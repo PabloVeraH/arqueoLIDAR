@@ -107,3 +107,33 @@ struct DomainTests {
         #expect(seq1 != seq3)
     }
 }
+
+@Suite("F15 Domain: informe de calidad de la sesión")
+struct QualityReportTests {
+
+    @Test("Sesión corta y limpia: sin advertencias")
+    func cleanSession() {
+        let q = QualityReport(duration: 120, pathLength: 8, interruptions: 0, limitedTrackingSeconds: 5,
+                              sunSaturationSeconds: 0, maxThermal: .fair)
+        #expect(q.flags.isEmpty)
+    }
+
+    @Test("Cada límite superado deja su advertencia, y se declara que los límites son provisorios")
+    func everyLimitFlags() {
+        let q = QualityReport(duration: 900, pathLength: 75, interruptions: 2, limitedTrackingSeconds: 400,
+                              sunSaturationSeconds: 30, maxThermal: .serious)
+        #expect(q.flags.count == 7, "\(q.flags)")
+        #expect(q.flags.contains { $0.hasPrefix("Escaneo largo (15 min") })
+        #expect(q.flags.contains { $0.contains("2 interrupción") })
+        #expect(q.flags.last?.contains("provisorios") == true)
+    }
+
+    @Test("Con límites validados no se agrega la nota de provisorios")
+    func validatedLimits() {
+        var limits = QualityLimits.provisional
+        limits.validated = true
+        let q = QualityReport(duration: 900, pathLength: 1, interruptions: 0, limitedTrackingSeconds: 0,
+                              sunSaturationSeconds: 0, maxThermal: .nominal, limits: limits)
+        #expect(q.flags.count == 1)
+    }
+}

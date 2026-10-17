@@ -34,10 +34,45 @@ final class ScanController {
     /// Objeto marcado con la mira: caja inicial para medir el volumen después.
     private(set) var objectMark: ObjectMark?
 
+    // Calidad de la sesión (F15): se guarda con el escaneo (quality.json,
+    // trajectory.json). La trayectoria sirve además para el norte verdadero.
+    private(set) var trajectory: [CameraSample] = []
+    private(set) var pathLength: Float = 0
+    private(set) var sessionStart = Date()
+    private(set) var interruptions = 0
+    private(set) var isInterrupted = false
+    private(set) var sunWarning = false
+    private(set) var lowDisk = false
+    private var limitedSeconds: TimeInterval = 0
+    private var sunSeconds: TimeInterval = 0
+    private var maxThermal: ThermalLevel = .nominal
+    private var lastRefresh: Date?
+
+    // ponytail: umbrales sin calibrar. Ajustarlos con las corridas al sol de M14
+    // (docs/VALIDATION.md) y con el tamaño real de un escaneo grande.
+    static let sunLowConfidenceFraction: Float = 0.4
+    static let sunAmbientIntensity: CGFloat = 2000
+    static let minFreeDisk: Int64 = 500_000_000
+
     init() {
         sceneView.delegate = wireframe
         sceneView.automaticallyUpdatesLighting = false
         sceneView.rendersCameraGrain = false
+        wireframe.onInterruption = { [weak self] began in
+            Task { @MainActor in self?.interruption(began) }
+        }
+    }
+
+    private func interruption(_ began: Bool) {
+        isInterrupted = began
+        if began { interruptions += 1 }
+    }
+
+    /// Resumen de la sesión actual para guardarlo con el escaneo.
+    func qualityReport() -> QualityReport {
+        QualityReport(duration: Date().timeIntervalSince(sessionStart), pathLength: pathLength,
+                      interruptions: interruptions, limitedTrackingSeconds: limitedSeconds,
+                      sunSaturationSeconds: sunSeconds, maxThermal: maxThermal)
     }
 
     func start() {
@@ -59,6 +94,15 @@ final class ScanController {
         isRunning = true
         noiseResult = nil
         objectMark = nil // las coordenadas del mundo anterior ya no valen
+        trajectory = []
+        pathLength = 0
+        sessionStart = Date()
+        interruptions = 0
+        isInterrupted = false
+        limitedSeconds = 0
+        sunSeconds = 0
+        maxThermal = .nominal
+        lastRefresh = nil
     }
 
     /// Reanuda tras una pausa SIN borrar la malla (p. ej. si se canceló Face ID
@@ -86,18 +130,40 @@ final class ScanController {
         let thermal = ProcessInfo.processInfo.thermalState
         switch thermal {
         case .nominal: thermalText = "normal"
-        case .fair: thermalText = "tibia"
-        case .serious: thermalText = "ALTA"
-        case .critical: thermalText = "CRÍTICA"
+        case .fair: thermalText = "tibia"; maxThermal = max(maxThermal, .fair)
+        case .serious: thermalText = "ALTA"; maxThermal = max(maxThermal, .serious)
+        case .critical: thermalText = "CRÍTICA"; maxThermal = .critical
         @unknown default: thermalText = "?"
         }
         if let docs = FileManager.default.urls(for: .documentDirectory, in: .userDomainMask).first,
            let free = try? docs.resourceValues(forKeys: [.volumeAvailableCapacityForImportantUsageKey])
             .volumeAvailableCapacityForImportantUsage {
             freeDiskText = ByteCountFormatter.string(fromByteCount: free, countStyle: .file)
+            lowDisk = free < Self.minFreeDisk
         }
 
-        guard let frame = sceneView.session.currentFrame else { return }
+        guard isRunning, let frame = sceneView.session.currentFrame else { return }
+        let now = Date()
+        let dt = lastRefresh.map { now.timeIntervalSince($0) } ?? 0
+        lastRefresh = now
+
+        let c = frame.camera.transform.columns.3
+        let position = SIMD3<Float>(c.x, c.y, c.z)
+        if let last = trajectory.last?.position {
+            let step = simd_distance(last, position)
+            if step >= 0.05 {
+                trajectory.append(CameraSample(time: now, position: position))
+                pathLength += step
+            }
+        } else {
+            trajectory.append(CameraSample(time: now, position: position))
+        }
+
+        sunWarning = (Self.lowConfidenceFraction(frame) ?? 0) > Self.sunLowConfidenceFraction
+            && (frame.lightEstimate?.ambientIntensity ?? 0) > Self.sunAmbientIntensity
+        if sunWarning { sunSeconds += dt }
+        if case .normal = frame.camera.trackingState {} else { limitedSeconds += dt }
+
         let meshes = frame.anchors.compactMap { $0 as? ARMeshAnchor }
         anchorCount = meshes.count
         vertexCount = meshes.reduce(0) { $0 + $1.geometry.vertices.count }
@@ -167,6 +233,27 @@ final class ScanController {
         } catch {
             noiseResult = "No se encontró un plano bajo la mira. Apunta a una pared despejada. (\(error))"
         }
+    }
+
+    /// Fracción de píxeles de profundidad con confianza baja (muestreo 1 de 16).
+    /// Con sol directo el LiDAR pierde retorno y esta fracción sube.
+    private static func lowConfidenceFraction(_ frame: ARFrame) -> Float? {
+        guard let map = (frame.smoothedSceneDepth ?? frame.sceneDepth)?.confidenceMap else { return nil }
+        CVPixelBufferLockBaseAddress(map, .readOnly)
+        defer { CVPixelBufferUnlockBaseAddress(map, .readOnly) }
+        guard let base = CVPixelBufferGetBaseAddress(map) else { return nil }
+        let width = CVPixelBufferGetWidth(map), height = CVPixelBufferGetHeight(map)
+        let rowBytes = CVPixelBufferGetBytesPerRow(map)
+        let lowValue = UInt8(ARConfidenceLevel.low.rawValue)
+        var low = 0, total = 0
+        for y in stride(from: 0, to: height, by: 4) {
+            let row = base.advanced(by: y * rowBytes).assumingMemoryBound(to: UInt8.self)
+            for x in stride(from: 0, to: width, by: 4) {
+                total += 1
+                if row[x] == lowValue { low += 1 }
+            }
+        }
+        return total > 0 ? Float(low) / Float(total) : nil
     }
 
     /// Marca el objeto que está bajo la mira, con un radio aproximado.

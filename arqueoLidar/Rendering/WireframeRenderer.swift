@@ -11,6 +11,15 @@ import SwiftUI
 /// Corre en el hilo de render de SceneKit, por eso es `nonisolated`.
 nonisolated final class WireframeRenderer: NSObject, ARSCNViewDelegate {
 
+    /// true al interrumpirse la sesión (llamada, bloqueo, segundo plano), false al volver.
+    var onInterruption: ((Bool) -> Void)?
+
+    func sessionWasInterrupted(_ session: ARSession) { onInterruption?(true) }
+    func sessionInterruptionEnded(_ session: ARSession) { onInterruption?(false) }
+    /// Tras una interrupción ARKit intenta reubicarse en la malla ya capturada en
+    /// vez de empezar de cero: es lo que evita perder lo escaneado.
+    func sessionShouldAttemptRelocalization(_ session: ARSession) -> Bool { true }
+
     func renderer(_ renderer: any SCNSceneRenderer, nodeFor anchor: ARAnchor) -> SCNNode? {
         guard let meshAnchor = anchor as? ARMeshAnchor else { return nil }
         return SCNNode(geometry: Self.geometry(from: meshAnchor.geometry))

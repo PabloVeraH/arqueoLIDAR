@@ -343,6 +343,7 @@ struct FindingDetailView: View {
     @State private var scans: [ScanEntry] = []
     @State private var history: [SealChange] = []
     @State private var notes: [String: CustodyNote] = [:]
+    @State private var recovered: [String] = []
     @State private var showSealNote = false
     @State private var showCapture = false
     @State private var verdict: CustodyVerdict?
@@ -350,6 +351,16 @@ struct FindingDetailView: View {
 
     var body: some View {
         List {
+            if !recovered.isEmpty {
+                Section {
+                    Label("Se apartaron \(recovered.count) elemento(s) que no alcanzaron a sellarse (por ejemplo, la app se cerró mientras guardaba). El expediente sigue íntegro.",
+                          systemImage: "tray.and.arrow.down")
+                    ForEach(recovered, id: \.self) { Text(CustodyText.describe(path: $0, scans: scans)).font(.caption) }
+                } footer: {
+                    Text("Quedaron en Archivos → En mi iPhone → ArqueoLiDAR → Recuperados, fuera del expediente. Si era un escaneo, vuelve a hacerlo.")
+                }
+            }
+
             Section("Expediente") {
                 LabeledContent("Código", value: finding.expeditionCode)
                 LabeledContent("Responsable", value: "\(finding.author.name) (\(finding.author.role))")
@@ -464,6 +475,7 @@ struct FindingDetailView: View {
     }
 
     private func reload() {
+        recovered += FieldStore.recoverUnsealed(finding)
         scans = FieldStore.scans(of: finding)
         history = FieldStore.sealHistory(finding)
         notes = FieldStore.notes(finding)
@@ -535,6 +547,21 @@ struct ScanDetailView: View {
                 Text("Reemplazo")
             } footer: {
                 Text("Si este escaneo salió mal, haz uno nuevo que lo reemplace. Este no se borra: la evidencia sellada se conserva y el nuevo declara a cuál reemplaza y por qué.")
+            }
+
+            if let quality = FieldStore.quality(entry) {
+                Section {
+                    LabeledContent("Duración", value: "\(Int((quality.duration / 60).rounded())) min")
+                    LabeledContent("Recorrido de la cámara", value: "\(Int(quality.pathLength)) m")
+                    if quality.flags.isEmpty {
+                        Label("Sin advertencias", systemImage: "checkmark.circle").foregroundStyle(.green)
+                    }
+                    ForEach(quality.flags, id: \.self) {
+                        Label($0, systemImage: "exclamationmark.triangle").font(.caption).foregroundStyle(.orange)
+                    }
+                } header: {
+                    Text("Calidad de la captura")
+                }
             }
 
             Section("Ubicación") {

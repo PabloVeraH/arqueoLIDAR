@@ -107,11 +107,22 @@ Solo se ejercitan en Diagnóstico (`ModuleSelfTests.swift`):
 
 ## 6. Robustez (Fase 15)
 
-- [ ] `Diagnostics/` y `QualityReport` (hoy solo HUD de temperatura y disco).
-- [ ] Captura por teselas para objetos > 5 m, con error de cierre reportado.
-- [ ] Aviso de saturación por sol directo.
-- [ ] Límite de duración por deriva de ARKit.
-- [ ] Sobrevivir a interrupciones (llamada, bloqueo) sin perder datos escritos.
+- [~] **Informe de calidad por escaneo** (2026-10-17): `QualityReport` (Domain), guardado y
+  sellado como `quality.json`: duración, recorrido, interrupciones, seguimiento limitado,
+  sol y temperatura, con advertencias en palabras. Se muestra en la ficha del escaneo.
+  Los límites son **provisorios** (`QualityLimits.provisional`) hasta M14.
+- [~] **Interrupciones**: aviso en la captura y conteo. ARKit intenta reubicarse sin borrar
+  la malla (`sessionShouldAttemptRelocalization`). Si un guardado se cortó, lo no sellado
+  se aparta a `Recuperados/` al abrir el hallazgo (`SealHistory.unsealedItems`) y el
+  expediente sigue íntegro.
+- [~] **Sol directo**: aviso cuando la confianza de profundidad cae y la luz es alta.
+  Umbrales sin calibrar (`ScanController.sun…`).
+- [~] **Límite de duración y recorrido**: tiempo y metros en el HUD, con aviso al superar el
+  límite provisorio.
+- [~] **Disco bajo**: con menos de 500 MB libres no deja guardar y explica qué hacer.
+- [ ] **Captura por teselas (> 5 m)**: no se hizo. Medir el error de unión entre teselas
+  necesita la deriva real de ARKit (M14); hacerlo antes sería inventar el número.
+- Todo lo anterior falta compilarlo y probarlo en el iPhone (M15).
 
 ## 7. Validación en terreno (Fase 16)
 

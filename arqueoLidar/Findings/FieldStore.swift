@@ -36,6 +36,16 @@ nonisolated struct SavedScan: Sendable, Identifiable {
     var id: UUID { scanID }
 }
 
+/// Lo que entrega la captura al guardar.
+nonisolated struct CaptureRecord: Sendable {
+    let parts: [MeshPart]
+    let fixes: [GeoFix]
+    let purpose: ScanPurpose
+    let mark: ObjectMark?
+    let trajectory: [CameraSample]
+    let quality: QualityReport
+}
+
 nonisolated struct ScanEntry: Identifiable, Sendable {
     let scan: ScanSession
     let dir: URL
@@ -123,10 +133,10 @@ nonisolated enum FieldStore {
 
     /// Fusiona los trozos de malla de ARKit, guarda el escaneo con la serie GPS
     /// completa y sella el expediente (nuevo eslabón en seals/chain.jsonl).
-    static func saveScan(parts: [MeshPart], fixes: [GeoFix], purpose: ScanPurpose,
-                         mark: ObjectMark?, finding: Finding,
+    static func saveScan(_ capture: CaptureRecord, finding: Finding,
                          replacing: ScanEntry? = nil, reason: String? = nil) async throws -> SavedScan {
-        let merged = MeshMergerCore().merge(parts: parts)
+        let fixes = capture.fixes
+        let merged = MeshMergerCore().merge(parts: capture.parts)
         guard !merged.isEmpty else {
             throw FieldError("No hay malla para guardar. Recorre la zona con la cámara hasta ver el wireframe.")
         }
@@ -136,9 +146,9 @@ nonisolated enum FieldStore {
                         normals: MeshOps().computeVertexNormals(merged).map(vecNormalize))
 
         let verdict = FixQualityGate().evaluate(burst: fixes)
-        let scan = ScanSession(findingID: finding.findingID, purpose: purpose,
+        let scan = ScanSession(findingID: finding.findingID, purpose: capture.purpose,
                                supersedes: replacing?.scan.scanID,
-                               georeferenceQuality: verdict.quality, objectMark: mark,
+                               georeferenceQuality: verdict.quality, objectMark: capture.mark,
                                supersedesReason: replacing == nil ? nil : reason)
 
         let scanDir = try writer.createScanDir(scan, findingID: finding.findingID)
@@ -146,6 +156,11 @@ nonisolated enum FieldStore {
         // El plan (§2.C.5) pide persistir la serie entera, no solo la fijación elegida.
         try CanonicalJSONEncoder().encode(fixes)
             .write(to: scanDir.appendingPathComponent("geo.json"), options: .atomic)
+        // Recorrido de la cámara (norte verdadero) y calidad de la sesión, sellados con el escaneo.
+        try CanonicalJSONEncoder().encode(capture.trajectory)
+            .write(to: scanDir.appendingPathComponent("trajectory.json"), options: .atomic)
+        try CanonicalJSONEncoder().encode(capture.quality)
+            .write(to: scanDir.appendingPathComponent("quality.json"), options: .atomic)
 
         // `.sealed` se escribe ANTES de sellar para que quede dentro del manifiesto:
         // Hasher solo excluye el `.sealed` de la raíz del bundle, no el de cada
@@ -285,6 +300,32 @@ nonisolated enum FieldStore {
         try fm.removeItem(at: findingDir(finding))
         let exports = documents.appendingPathComponent("Exports").appendingPathComponent(findingDir(finding).lastPathComponent)
         if fm.fileExists(atPath: exports.path) { try fm.removeItem(at: exports) }
+    }
+
+    /// Aparta a Documents/Recuperados/FND-…/ los escaneos, mediciones o notas que
+    /// quedaron en disco sin sellar (guardado cortado por cierre de la app o
+    /// batería). Dentro del expediente harían fallar la verificación; afuera se
+    /// conservan para revisarlos. Lo sellado nunca se mueve (SealHistory.unsealedItems).
+    static func recoverUnsealed(_ finding: Finding) -> [String] {
+        let dir = findingDir(finding)
+        guard FileManager.default.fileExists(atPath: dir.appendingPathComponent("seals/chain.jsonl").path) else { return [] }
+        let items = SealHistory.unsealedItems(bundleAt: dir)
+        let target = documents.appendingPathComponent("Recuperados").appendingPathComponent(dir.lastPathComponent)
+        return items.compactMap { item in
+            let destination = target.appendingPathComponent(item + "-" + String(UUID().uuidString.prefix(4)))
+            do {
+                try FileManager.default.createDirectory(at: destination.deletingLastPathComponent(),
+                                                        withIntermediateDirectories: true)
+                try FileManager.default.moveItem(at: dir.appendingPathComponent(item), to: destination)
+                return item
+            } catch {
+                return nil
+            }
+        }
+    }
+
+    static func quality(_ entry: ScanEntry) -> QualityReport? {
+        load(QualityReport.self, from: entry.dir.appendingPathComponent("quality.json"))
     }
 
     /// Qué selló cada eslabón de la cadena, del primero al último.
