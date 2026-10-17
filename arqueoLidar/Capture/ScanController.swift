@@ -57,6 +57,14 @@ final class ScanController {
         noiseResult = nil
     }
 
+    /// Reanuda tras una pausa SIN borrar la malla (p. ej. si se canceló Face ID
+    /// al sellar): el escaneo sigue ahí y se puede volver a guardar.
+    func resume() {
+        guard !isRunning, let config = sceneView.session.configuration else { return start() }
+        sceneView.session.run(config)
+        isRunning = true
+    }
+
     func pause() {
         guard isRunning else { return }
         sceneView.session.pause()

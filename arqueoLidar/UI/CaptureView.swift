@@ -189,9 +189,11 @@ struct CaptureView: View {
                 try? await Task.sleep(for: .milliseconds(400))
                 saved = result
             } catch {
+                // Nada quedó escrito si falló la autenticación (se pide antes de
+                // guardar): se reanuda sin borrar la malla para reintentar.
                 showSaveForm = false
                 errorText = error.localizedDescription
-                controller.start()
+                controller.resume()
             }
             isSaving = false
         }
@@ -212,6 +214,8 @@ struct SavedScanView: View {
                     LabeledContent("Vértices", value: scan.vertexCount.formatted())
                     LabeledContent("Triángulos", value: scan.triangleCount.formatted())
                     LabeledContent("Expediente", value: scan.folder.lastPathComponent)
+                    LabeledContent("Firma", value: scan.keyProtection == .secureEnclave
+                                   ? "Chip seguro del iPhone" : "Clave de software (sin chip seguro)")
                 }
                 Section {
                     Text(scan.rootHash)

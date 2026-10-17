@@ -31,6 +31,7 @@ nonisolated struct SavedScan: Sendable, Identifiable {
     let vertexCount: Int
     let triangleCount: Int
     let rootHash: String
+    let keyProtection: KeyProtection
     var id: UUID { scanID }
 }
 
@@ -45,11 +46,6 @@ nonisolated enum FieldStore {
 
     static let documents = FileManager.default.urls(for: .documentDirectory, in: .userDomainMask)[0]
     static let writer = BundleWriter(baseURL: documents)
-
-    // ponytail: clave de software nueva por cada arranque de la app. Cada sello
-    // lleva su propia clave pública, así que la cadena verifica igual; el plan
-    // (§2.C.6) pide Secure Enclave + Face ID para no-repudio real.
-    static let signingKey = SoftwareSigningKey()
 
     // MARK: - Sitios
 
@@ -132,6 +128,8 @@ nonisolated enum FieldStore {
         guard !merged.isEmpty else {
             throw FieldError("No hay malla para guardar. Recorre la zona con la cámara hasta ver el wireframe.")
         }
+        // Face ID o código antes de escribir nada (ver SealingKeyStore).
+        let key = try await SealingKeyStore.key(reason: "Sellar el escaneo de «\(finding.title)»")
         let mesh = Mesh(vertices: merged.vertices, indices: merged.indices,
                         normals: MeshOps().computeVertexNormals(merged).map(vecNormalize))
 
@@ -153,13 +151,13 @@ nonisolated enum FieldStore {
         let dir = findingDir(finding)
         let seal = try await SealSigner().seal(bundleAt: dir, author: finding.author,
                                                geo: representativeFix(fixes), previousSeal: lastSeal(dir),
-                                               key: signingKey)
+                                               key: key)
         try writer.appendSeal(seal, to: dir)
         try writer.writeVerifyDoc(to: dir, author: finding.author, rootHash: seal.rootHash)
         return SavedScan(scanID: scan.scanID, title: finding.title, folder: dir,
                          meshURL: scanDir.appendingPathComponent("mesh.ply"),
                          vertexCount: mesh.vertices.count, triangleCount: mesh.triangleCount,
-                         rootHash: seal.rootHash)
+                         rootHash: seal.rootHash, keyProtection: key.protection)
     }
 
     static func loadMesh(_ entry: ScanEntry) throws -> Mesh {
