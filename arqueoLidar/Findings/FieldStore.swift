@@ -252,6 +252,7 @@ nonisolated enum FieldStore {
             for url in newItems { try? FileManager.default.removeItem(at: url) }
             throw error
         }
+        writer.lockSealed(seal.manifest, in: dir)
         try writer.writeVerifyDoc(to: dir, author: finding.author, rootHash: seal.rootHash)
         try writer.writeChecksums(seal.manifest, to: dir)
         copyVerifier(to: dir)
@@ -280,6 +281,7 @@ nonisolated enum FieldStore {
             throw FieldError("Este expediente está íntegro y sellado: es evidencia y no se puede eliminar.")
         }
         let fm = FileManager.default
+        writer.unlockForDeletion(findingDir(finding)) // los sellados quedaron de solo lectura
         try fm.removeItem(at: findingDir(finding))
         let exports = documents.appendingPathComponent("Exports").appendingPathComponent(findingDir(finding).lastPathComponent)
         if fm.fileExists(atPath: exports.path) { try fm.removeItem(at: exports) }

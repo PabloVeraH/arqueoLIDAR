@@ -136,6 +136,42 @@ public struct BundleWriter: Sendable {
         try atomicWrite(data: content.data(using: .utf8)!, to: sealPath)
     }
 
+    /// WORM a nivel de sistema de archivos (plan §2.C.6): tras sellar, cada
+    /// archivo del manifiesto queda de solo lectura (0444) y cada carpeta de
+    /// escaneo no admite archivos nuevos (0555). La raíz, `seals/`,
+    /// `measurements/` y `notes/` siguen escribibles para los sellos siguientes.
+    /// No reemplaza a la verificación (quien tenga la carpeta puede devolver los
+    /// permisos): evita que la propia app u otra app la toquen por error.
+    public func lockSealed(_ manifest: [FileDigest], in findingDir: URL) {
+        var scanDirs = Set<String>()
+        for entry in manifest {
+            try? fileManager.setAttributes([.posixPermissions: 0o444],
+                                           ofItemAtPath: findingDir.appendingPathComponent(entry.relativePath).path)
+            let parts = entry.relativePath.split(separator: "/")
+            if parts.first == "scans", parts.count >= 3 {
+                // Carpetas desde scans/<id> hasta la del archivo (p. ej. specimens/).
+                for depth in 2..<parts.count { scanDirs.insert(parts.prefix(depth).joined(separator: "/")) }
+            }
+        }
+        for dir in scanDirs {
+            try? fileManager.setAttributes([.posixPermissions: 0o555],
+                                           ofItemAtPath: findingDir.appendingPathComponent(dir).path)
+        }
+    }
+
+    /// Devuelve los permisos de escritura a todo el expediente. Solo para
+    /// borrarlo (`FieldStore.deleteIfNotIntact`, que ya comprobó que no es íntegro).
+    public func unlockForDeletion(_ findingDir: URL) {
+        try? fileManager.setAttributes([.posixPermissions: 0o755], ofItemAtPath: findingDir.path)
+        guard let paths = fileManager.enumerator(atPath: findingDir.path) else { return }
+        while let rel = paths.nextObject() as? String {
+            let url = findingDir.appendingPathComponent(rel)
+            var isDir: ObjCBool = false
+            fileManager.fileExists(atPath: url.path, isDirectory: &isDir)
+            try? fileManager.setAttributes([.posixPermissions: isDir.boolValue ? 0o755 : 0o644], ofItemAtPath: url.path)
+        }
+    }
+
     public func isSealed(scanDir: URL) -> Bool {
         fileManager.fileExists(atPath: scanDir.appendingPathComponent(".sealed").path)
     }

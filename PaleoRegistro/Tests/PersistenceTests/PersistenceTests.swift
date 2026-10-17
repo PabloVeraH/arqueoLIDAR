@@ -304,6 +304,34 @@ struct BundleWriterTests {
         #expect(content.contains("python3 seals/verify_chain.py ."))
     }
 
+    @Test("WORM: tras sellar, los archivos no se pueden modificar ni agregar al escaneo; se puede borrar tras desbloquear")
+    func lockSealedFiles() throws {
+        let base = tempDir()
+        defer { BundleWriter(baseURL: base).unlockForDeletion(base); cleanup(base) }
+        let writer = BundleWriter(baseURL: base)
+        let dir = base.appendingPathComponent("Findings/worm")
+        let scan = dir.appendingPathComponent("scans/S1/specimens")
+        try FileManager.default.createDirectory(at: scan, withIntermediateDirectories: true)
+        let mesh = dir.appendingPathComponent("scans/S1/mesh.ply")
+        try Data("malla".utf8).write(to: mesh)
+        try Data("ficha".utf8).write(to: dir.appendingPathComponent("finding.json"))
+        let manifest = [FileDigest(relativePath: "finding.json", bytes: 5, sha256: ""),
+                        FileDigest(relativePath: "scans/S1/mesh.ply", bytes: 5, sha256: "")]
+
+        writer.lockSealed(manifest, in: dir)
+        #expect(throws: (any Error).self) { try Data("otra".utf8).write(to: mesh) }
+        #expect(throws: (any Error).self) {
+            try Data("x".utf8).write(to: dir.appendingPathComponent("scans/S1/nuevo.txt"))
+        }
+        // La raíz sigue escribible: ahí van los sellos y las mediciones siguientes.
+        try Data("ok".utf8).write(to: dir.appendingPathComponent("VERIFY.txt"))
+        #expect(try String(contentsOf: mesh, encoding: .utf8) == "malla")
+
+        writer.unlockForDeletion(dir)
+        try FileManager.default.removeItem(at: dir)
+        #expect(!FileManager.default.fileExists(atPath: dir.path))
+    }
+
     @Test("appendSeal añade líneas a chain.jsonl")
     func appendSealAppendsToChain() throws {
         let base = tempDir()

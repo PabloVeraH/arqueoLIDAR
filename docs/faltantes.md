@@ -33,8 +33,10 @@ en la app y `tools/verify_chain.py`.
 - [ ] **Recortar el final de la cadena** (quitar los últimos sellos y sus escaneos) no se
   detecta sin un ancla externa (copia entregada, TSA). Es un límite conocido; se
   documenta, no se resuelve en v1.
-- [ ] **WORM real**: hoy solo se escribe `.sealed`; el directorio sellado no queda de solo
-  lectura.
+- [~] **WORM real** (2026-10-17): tras cada sello, los archivos del manifiesto quedan en
+  0444 y las carpetas de escaneo en 0555 (`BundleWriter.lockSealed`). Borrar un
+  expediente no íntegro primero devuelve los permisos. Es prevención, no reemplaza la
+  verificación. Falta probarlo en el iPhone (M12).
 - [~] **Sellar antes / después de una intervención** (2026-10-17): botón «Sellar estado
   actual» en la ficha del hallazgo. Guarda `notes/NOTE-….json` (momento + nota) y lo
   sella con Face ID y el GPS del momento. Aparece en el historial. Falta probarlo (M10).

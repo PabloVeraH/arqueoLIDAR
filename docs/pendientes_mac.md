@@ -160,6 +160,18 @@ Compila (`CaptureView(finding:replacing:)`, `ScanSession.supersedesReason`). En 
 3. El original ya no ofrece reemplazarse otra vez; Verificar → Íntegro.
 **Bien si:** todo lo anterior.
 
+### M12 · 2026-10-17 · punto 5 de custodia · Archivos sellados de solo lectura
+`swift test` (prueba "WORM…" en PersistenceTests; si corres los tests como root, los
+permisos no se aplican y esa prueba falla: córrelos como usuario normal). En el iPhone:
+1. Sella un escaneo, copia el expediente a la Mac y revisa con `ls -l` que `mesh.ply`
+   esté `r--r--r--` y `scans/<id>/` `r-xr-xr-x`.
+2. Un segundo escaneo y una medición en el mismo expediente → se guardan bien (la raíz,
+   `measurements/` y `notes/` siguen escribibles). Verificar → Íntegro.
+3. Eliminar un expediente NO íntegro (por ejemplo, uno de los de sellos inválidos) → se
+   borra completo. Uno íntegro → "No se eliminó".
+4. Anota qué pasa si se intenta borrar el expediente desde la app Archivos.
+**Bien si:** 1–3 como se describe.
+
 ## Resueltas
 
 _(vacío)_

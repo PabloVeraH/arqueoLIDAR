@@ -66,6 +66,7 @@ Sitios → Hallazgos del sitio → Ficha del hallazgo → Escaneo → Visor 3D y
 - Comprueba la **cadena de custodia**: dice "Íntegro" o explica en palabras qué cambió, falta o sobra. Por ejemplo: "Se modificó el modelo 3D del escaneo «Registro inicial» del 14 oct 2026 después de sellarse". Un desplegable "Detalle técnico" guarda el dato exacto para un perito.
 - **"Sellar estado actual"** deja un sello a propósito, sin escaneo nuevo: se elige el momento ("Antes de intervenir", "Después de intervenir" o "Control"), se escribe una nota (por ejemplo, "extracción del cráneo con yeso") y se confirma con Face ID. Si hay señal, el sello lleva la ubicación y la hora del GPS.
 - El **historial de sellos** muestra cada sello con su fecha y hora, qué incorporó (apertura del expediente, escaneo nuevo, medición nueva), con qué clave se firmó y si hubo un cambio de clave (otro iPhone).
+- Después de sellar, los archivos del escaneo quedan **de solo lectura** en el iPhone. Esto evita cambios por error; la verificación sigue siendo la prueba.
 - Ojo: la custodia protege el **registro digital** (escaneos, GPS, fichas y mediciones). No sigue a la pieza física: quién la tiene o adónde se trasladó se documenta aparte, con las actas que pida el CMN.
 - El expediente completo se puede compartir y verificar en un computador **sin la app** con `tools/verify_chain.py`.
 
