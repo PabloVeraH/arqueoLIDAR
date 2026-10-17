@@ -45,8 +45,13 @@ en la app y `tools/verify_chain.py`.
 
 Solo se ejercitan en Diagnóstico (`ModuleSelfTests.swift`):
 
-- [ ] **Volumen**: `VolumePolicy`, `CavityIntegrator`, sólido cerrado, con etiqueta visual
-  distinta para **medido vs. inferido**.
+- [~] **Volumen medido vs. inferido en la ficha** (2026-10-17): se marca el objeto al
+  capturar, se ajusta una caja en el visor, `VolumeMeasurer` decide medido/inferido y la
+  medición se sella en `measurements/`. Falta compilar y probar en el iPhone (M5, M6).
+  Quedan fuera: cavidad contra un escaneo previo (necesita ICP, sería MEDIDO), simetría,
+  caja girada (hoy alineada a los ejes de la captura) y tocar la malla para ubicarla.
+  Riesgo conocido: las mallas de ARKit tienen muchos huecos, y tapar todos los bordes
+  (`MeshCloser`) puede fallar en el sólido cerrado. Se verá en M6.
 - [ ] **Estratigrafía**: orto-imagen (`Rectifier`), marcar límites con el dedo
   (`StratumBoundaryPicker`), potencia (`ThicknessCalculator`).
 - [ ] **Especímenes**: `MeshSegmenter`, `ManualSegmenter` (dividir/unir),
@@ -98,3 +103,4 @@ Solo se ejercitan en Diagnóstico (`ModuleSelfTests.swift`):
 |---|---|---|---|
 | 2026-10-17 | Inventario inicial | — | 21f8258 |
 | 2026-10-17 | Firma v2, rotación declarada, chip seguro + Face ID/código, cancelar sin perder la malla | [~] sin compilar; falta prueba en iPhone | 3d63b17, fbe49da |
+| 2026-10-17 | Volumen medido vs. inferido en la ficha; marcar objeto al capturar; incertidumbre de volumen en m³ (bug) | [~] sin compilar; falta prueba en iPhone | c0f48bd, 48c4570 |

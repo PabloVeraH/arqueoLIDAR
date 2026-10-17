@@ -36,6 +36,7 @@ Sitios → Hallazgos del sitio → Ficha del hallazgo → Escaneo → Visor 3D y
 - Se escanea con la **cámara y el LiDAR**, viendo la malla 3D en vivo sobre la imagen, mientras el **GPS** registra todas sus lecturas.
 - Un panel muestra si el seguimiento es bueno, la temperatura del teléfono y el espacio libre.
 - El botón "Medir ruido" indica cuánto tiembla la medición sobre una pared plana, en milímetros.
+- El botón **"Marcar"** deja anotado cuál es el objeto: se apunta la mira al hueso o pieza, se elige un radio aproximado (25 cm a 2 m) y queda guardado con el escaneo. Conviene escanear **solo el objeto y una franja de suelo alrededor**: todo lo que la cámara ve entra en el modelo.
 - Al guardar se elige el **propósito** (registro inicial, monitoreo, evaluación de daño, rescate…) y el escaneo se **sella**. Antes de guardar, el iPhone pide **Face ID o su código**: la firma se hace con una clave guardada en el **chip seguro** del teléfono, que no se puede copiar. Si se cancela Face ID, no se guarda nada y el escaneo sigue en pantalla para volver a intentarlo. Si el GPS fue malo, queda marcado "GPS degradado" o "Sin GPS".
 - Si el iPhone no tiene código configurado, igual se sella, pero con una clave común (sin chip seguro). La pantalla final y el propio sello lo indican, porque esa firma prueba menos.
 
@@ -43,12 +44,22 @@ Sitios → Hallazgos del sitio → Ficha del hallazgo → Escaneo → Visor 3D y
 
 - El escaneo guardado se puede **ver en 3D**: girar con un dedo y acercar con dos. Muestra también su ubicación y precisión.
 
-### 5. Exportar
+### 5. Volumen
+
+- En la ficha del escaneo, **"Medir volumen"** muestra el modelo con una **caja naranja** que parte en el objeto marcado. Se ajusta con deslizadores (posición y tamaño) para que rodee el objeto con un poco de suelo alrededor.
+- La app elige el cálculo según el propósito del escaneo: montículo o zanja sobre el suelo (registro inicial, monitoreo), pieza completa (rescate, inventario) o material faltante (evaluación de daño).
+- Cada número lleva una etiqueta que no se puede confundir:
+  - **MEDIDO**: sale directo de la superficie escaneada.
+  - **INFERIDO · estimación**: la app tuvo que suponer algo que no se ve. Por ejemplo, la cara del hueso apoyada en el suelo, o cómo era la superficie antes del daño. Debajo se escribe qué se supuso.
+- Hasta que se hagan las pruebas de terreno con objetos de medida conocida, la app dice **"Precisión en terreno: no validada"** y no muestra un margen de error.
+- Al guardar se pide Face ID o el código, y la medición queda **sellada** en el expediente (carpeta `measurements/`).
+
+### 6. Exportar
 
 - Genera **PLY, STL, OBJ, LAS y GeoJSON**, cada uno con su ficha técnica `record.json`, y permite compartirlos.
 - Los archivos quedan en la app Archivos → En mi iPhone → ArqueoLiDAR → `Exports/`, **fuera** del expediente para no alterar el sello.
 
-### 6. Verificar el expediente
+### 7. Verificar el expediente
 
 - Comprueba la **cadena de custodia**: dice "Íntegro" o lista qué archivo cambió, falta o sobra.
 - El expediente completo se puede compartir y verificar en un computador **sin la app** con `tools/verify_chain.py`.
@@ -56,7 +67,7 @@ Sitios → Hallazgos del sitio → Ficha del hallazgo → Escaneo → Visor 3D y
 ### Lo que la app todavía no hace
 
 1. **Probar la firma con chip seguro en un iPhone real.** Ya está programada (Face ID o código, y cambio de clave declarado), pero falta probarla en el teléfono (ver `docs/registro_pruebas.md`).
-2. **Mediciones desde la pantalla.** Volúmenes, potencia de estratos, separación de especímenes y comparación entre dos campañas ya están programados y probados, pero todavía no tienen botones en la app.
+2. **Más mediciones desde la pantalla.** El volumen ya tiene pantalla (falta probarla en el iPhone). La potencia de estratos, la separación de especímenes y la comparación entre dos campañas están programadas y probadas, pero todavía no tienen botones. El daño todavía no se puede comparar contra un escaneo anterior de la pieza intacta (eso daría un valor MEDIDO en vez de inferido).
 3. **Norte verdadero.** El modelo 3D queda con la vertical correcta, pero su giro respecto del norte es arbitrario. Falta guardar el recorrido de la cámara para calcularlo con la traza GPS. Por lo mismo, el sitio guarda su punto GPS pero no su orientación.
 4. **Notificación al CMN** (fecha, canal, folio) dentro del expediente.
 5. **Informe PDF, CSV de especímenes y fotos de respaldo.** El CSV ya existe por dentro, pero solo tiene sentido cuando haya especímenes separados.
@@ -85,9 +96,10 @@ Quien desarrolla puede comprobarlas en el iPhone con la pestaña **Diagnóstico*
 | Hallazgos | Estructura de Trabajo, Persistence, Custody (para decidir si se puede borrar) |
 | Captura LiDAR | Mesh, Geo, Geometry ("Medir ruido"), Persistence, Custody |
 | Visor 3D | Mesh |
+| Volumen | Volume, Mesh (recorte), Geometry (suelo), Persistence, Custody |
 | Exportar | Export, Geo |
 | Verificar el expediente | Custody |
-| Mediciones, estratos, especímenes, comparación (aún sin pantalla) | Volume, Stratigraphy, Segmentation, Geometry, Registration |
+| Estratos, especímenes, comparación (aún sin pantalla) | Volume, Stratigraphy, Segmentation, Geometry, Registration |
 
 ## Cómo se usarían en terreno
 

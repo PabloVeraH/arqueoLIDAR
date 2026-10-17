@@ -77,6 +77,32 @@ respaldo; un expediente antiguo (v1) + sello nuevo sigue Íntegro; `verify_chain
 en la Mac; el simulador sella con "Clave de software".
 **Bien si:** todo da lo esperado. Anota el resultado en `registro_pruebas.md`.
 
+### M5 · 2026-10-17 · `c0f48bd`, `48c4570` · Compilar y testear el volumen
+`swift build && swift test` (suite "medición en la ficha (medido vs. inferido)", 6 pruebas).
+Si falla "Domo abierto…", revisa primero que `MeshCloser` deje estanca la combinación de
+domo y suelo; no relajes la etiqueta INFERIDO. Después compila la app con `xcodebuild`.
+Puntos de riesgo: `UI/VolumeViews.swift` (deslizadores con `WritableKeyPath` sobre
+`SIMD3<Float>`, el `switch` sobre `VolumeError?` en `message`), `MeshViewer` (ahora arma la
+escena en `onAppear`) y que los cuatro botones de la captura quepan en un iPhone angosto.
+**Bien si:** todo en verde y sin advertencias nuevas.
+
+### M6 · 2026-10-17 · `48c4570` · Probar el volumen en el iPhone
+1. Captura de un objeto de medidas conocidas (una caja de cartón medida con huincha)
+   sobre el suelo: «Marcar» con la mira sobre la caja → guardar con propósito
+   "Registro inicial" → ficha → Medir volumen: la caja naranja aparece sobre el objeto.
+   Ajusta la caja, toca Calcular: debe salir **MEDIDO**. Anota el valor contra
+   largo×ancho×alto.
+2. El mismo objeto guardado como "Inventario de especímenes": debe salir **INFERIDO** con
+   el texto de aristas tapadas, o un error claro si no se pudo cerrar la malla (anota cuál).
+3. "Evaluación de daño" sobre una superficie con un hueco conocido (por ejemplo, un balde
+   de arena con un hoyo de volumen medido): **INFERIDO** y valor cercano.
+4. Caja sin suelo alrededor → mensaje "No se encontró el suelo…", nunca un número.
+5. Guardar y sellar → pide Face ID; vuelve a la ficha con la medición listada; Verificar
+   el expediente → **Íntegro**. Cancelar Face ID no deja `measurements/MSR-…json` suelto.
+6. Un escaneo antiguo (sin marca) → la caja parte cubriendo todo el escaneo.
+**Bien si:** las etiquetas salen como se describe. Anota en `registro_pruebas.md` los
+valores contra la huincha (esto alimenta la Fase 16).
+
 ## Resueltas
 
 _(vacío)_

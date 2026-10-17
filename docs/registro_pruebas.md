@@ -80,3 +80,8 @@ En el iPhone:
   Íntegro; el sello nuevo lleva `"signatureVersion":2` y `previousKeyID` con la clave vieja.
 - `verify_chain.py` en la Mac sobre ese expediente → OK.
 - Simulador (sin chip seguro) → sella con "Clave de software (sin chip seguro)".
+
+### Pendiente: volumen medido vs. inferido (2026-10-17, `c0f48bd`, `48c4570`)
+
+Sin compilar. Pasos en `docs/pendientes_mac.md` (M5 compilar y testear, M6 en el iPhone).
+Anotar aquí los volúmenes contra la huincha: valor de la app, valor real, MEDIDO/INFERIDO.
