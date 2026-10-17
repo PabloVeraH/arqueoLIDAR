@@ -56,7 +56,10 @@ public enum RegistrationError: Error, Equatable, Sendable {
 
 public enum CustodyError: Error, Equatable, Sendable {
     case bundleNotFound
+    /// Ruta relativa de un archivo cuya huella ya no coincide con la sellada.
     case hashMismatch(String)
+    /// Ruta relativa de un archivo sellado que ya no está.
+    case fileMissing(String)
     case chainBroken(index: Int, reason: String)
     case manifestTampered
     case extraFileNotDeclared(String)

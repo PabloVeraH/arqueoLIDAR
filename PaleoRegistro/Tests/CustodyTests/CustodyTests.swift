@@ -487,3 +487,44 @@ struct SealV2Tests {
         #expect(restored.publicKeyDER == key.publicKeyDER)
     }
 }
+
+@Suite("F14 Custody: historial de sellos")
+struct SealHistoryTests {
+
+    @Test("Cada sello informa qué agregó, cambió o quitó respecto del anterior")
+    func changesPerSeal() async throws {
+        let dir = tempBundleDir(name: "history")
+        defer { try? FileManager.default.removeItem(at: dir) }
+        let fm = FileManager.default
+        try fm.createDirectory(at: dir.appendingPathComponent("seals"), withIntermediateDirectories: true)
+        try Data("ficha".utf8).write(to: dir.appendingPathComponent("finding.json"))
+        let key = SoftwareSigningKey()
+        let author = AuthorIdentity(name: "A", role: "R", institution: "I")
+        let signer = SealSigner()
+
+        let s0 = try await signer.seal(bundleAt: dir, author: author, geo: nil, previousSeal: nil, key: key)
+        try fm.createDirectory(at: dir.appendingPathComponent("measurements"), withIntermediateDirectories: true)
+        try Data("m".utf8).write(to: dir.appendingPathComponent("measurements/MSR-1.json"))
+        let s1 = try await signer.seal(bundleAt: dir, author: author, geo: nil, previousSeal: s0, key: key)
+        try Data("ficha editada".utf8).write(to: dir.appendingPathComponent("finding.json"))
+        try fm.removeItem(at: dir.appendingPathComponent("measurements/MSR-1.json"))
+        let s2 = try await signer.seal(bundleAt: dir, author: author, geo: nil, previousSeal: s1, key: key)
+
+        var chain = Data()
+        for s in [s0, s1, s2] { chain += try CanonicalJSONEncoder().encode(s) + Data("\n".utf8) }
+        try chain.write(to: dir.appendingPathComponent("seals/chain.jsonl"))
+
+        let seals = SealHistory.read(bundleAt: dir)
+        #expect(seals.map(\.rootHash) == [s0, s1, s2].map(\.rootHash))
+        let changes = SealHistory.changes(seals)
+        #expect(changes[0].added == ["finding.json"])
+        #expect(changes[1].added == ["measurements/MSR-1.json"] && changes[1].modified.isEmpty)
+        #expect(changes[2].modified == ["finding.json"])
+        #expect(changes[2].removed == ["measurements/MSR-1.json"])
+    }
+
+    @Test("Sin chain.jsonl el historial está vacío")
+    func emptyWithoutChain() {
+        #expect(SealHistory.read(bundleAt: tempBundleDir(name: "nochain")).isEmpty)
+    }
+}

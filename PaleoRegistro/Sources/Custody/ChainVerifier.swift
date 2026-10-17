@@ -101,11 +101,11 @@ public struct ChainVerifier: ChainVerifying {
             for entry in lastSeal.manifest {
                 let filePath = url.appendingPathComponent(entry.relativePath).path
                 if !fm.fileExists(atPath: filePath) {
-                    errors.append(.hashMismatch("Falta: \(entry.relativePath)"))
+                    errors.append(.fileMissing(entry.relativePath))
                 } else {
                     let currentHash = try? hasher.hash(fileAt: URL(fileURLWithPath: filePath))
                     if currentHash != entry.sha256 {
-                        errors.append(.hashMismatch("Hash alterado: \(entry.relativePath)"))
+                        errors.append(.hashMismatch(entry.relativePath))
                     }
                 }
             }
