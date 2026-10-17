@@ -132,6 +132,22 @@ def main():
     write_chain(b, [s0])
     results.append(check("keyID falsa", b, False, "keyID no corresponde"))
 
+    # La app copia este script a seals/ de cada expediente (VERIFY.txt, nivel B):
+    # su copia empaquetada tiene que ser idéntica, y correr desde seals/ no
+    # debe contar como archivo del expediente.
+    here = os.path.dirname(os.path.abspath(__file__))
+    with open(os.path.join(here, "verify_chain.py"), "rb") as f:
+        original = f.read()
+    with open(os.path.join(here, "..", "arqueoLidar", "Resources", "verify_chain.py"), "rb") as f:
+        same = f.read() == original
+    print(("OK   " if same else "FALLO"), "copia de la app idéntica a tools/verify_chain.py")
+    results.append(same)
+    b = make_bundle()
+    write_chain(b, chain(b, [k1]))
+    with open(os.path.join(b, "seals", "verify_chain.py"), "wb") as f:
+        f.write(original)
+    results.append(check("copia dentro de seals/ no altera el expediente", b, True))
+
     sys.exit(0 if all(results) else 1)
 
 

@@ -277,6 +277,33 @@ struct BundleWriterTests {
         #expect(content.contains("shasum -a 256"))
     }
 
+    @Test("SHA256SUMS queda en el formato de shasum -a 256 -c, dentro de seals/")
+    func checksumsFormat() throws {
+        let base = tempDir()
+        defer { cleanup(base) }
+        let writer = BundleWriter(baseURL: base)
+        let dir = base.appendingPathComponent("Findings/sums")
+        try FileManager.default.createDirectory(at: dir, withIntermediateDirectories: true)
+        let a = String(repeating: "a", count: 64), b = String(repeating: "b", count: 64)
+        try writer.writeChecksums([FileDigest(relativePath: "finding.json", bytes: 1, sha256: a),
+                                   FileDigest(relativePath: "scans/X/mesh.ply", bytes: 2, sha256: b)], to: dir)
+        let text = try String(contentsOf: dir.appendingPathComponent("seals/SHA256SUMS"), encoding: .utf8)
+        #expect(text == "\(a)  finding.json\n\(b)  scans/X/mesh.ply\n")
+    }
+
+    @Test("VERIFY.txt explica los dos niveles con los archivos de seals/")
+    func verifyDocLevels() throws {
+        let base = tempDir()
+        defer { cleanup(base) }
+        let dir = base.appendingPathComponent("Findings/levels")
+        try FileManager.default.createDirectory(at: dir, withIntermediateDirectories: true)
+        try BundleWriter(baseURL: base).writeVerifyDoc(
+            to: dir, author: AuthorIdentity(name: "A", role: "R", institution: "I"), rootHash: "x")
+        let content = try String(contentsOf: dir.appendingPathComponent("VERIFY.txt"), encoding: .utf8)
+        #expect(content.contains("shasum -a 256 -c seals/SHA256SUMS"))
+        #expect(content.contains("python3 seals/verify_chain.py ."))
+    }
+
     @Test("appendSeal añade líneas a chain.jsonl")
     func appendSealAppendsToChain() throws {
         let base = tempDir()

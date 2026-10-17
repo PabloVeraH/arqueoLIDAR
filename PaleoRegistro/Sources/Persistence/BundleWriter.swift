@@ -148,6 +148,14 @@ public struct BundleWriter: Sendable {
         try atomicWrite(data: text.data(using: .utf8)!, to: path)
     }
 
+    /// `seals/SHA256SUMS` en el formato de `shasum -a 256 -c`: un perito puede
+    /// revisar los archivos sin instalar nada. Va dentro de `seals/`, que no
+    /// entra al manifiesto, así que reescribirlo no altera ningún sello.
+    public func writeChecksums(_ manifest: [FileDigest], to findingDir: URL) throws(StoreError) {
+        let text = manifest.map { "\($0.sha256)  \($0.relativePath)\n" }.joined()
+        try atomicWrite(data: Data(text.utf8), to: findingDir.appendingPathComponent("seals/SHA256SUMS"))
+    }
+
     // MARK: - Helpers
 
     public func findingURL(_ id: UUID) -> URL {
@@ -206,8 +214,9 @@ private enum VerifyTemplate {
         --------------------
         - Integridad de los archivos desde el momento del sellado.
         - No se ha modificado ningún archivo después del sellado.
-        - El orden de los sellos: cada firma (formato v2) cubre su número y el
-          hash del sello anterior; borrar o intercalar un sello rompe la firma.
+        - El orden de los sellos: desde el formato v2, cada firma cubre su
+          número y el hash del sello anterior; borrar o intercalar un sello
+          rompe la firma.
         - Si el sello dice keyProtection = "secureEnclave": la clave vive en el
           chip seguro de un iPhone, no se puede copiar, y sellar exigió Face ID
           o el código de ese iPhone.
@@ -225,14 +234,38 @@ private enum VerifyTemplate {
 
         CÓMO VERIFICAR
         --------------
-        1. Abrir una terminal en este directorio.
-        2. Ejecutar:  shasum -a 256 scans/*/mesh.ply
-        3. Comparar cada hash con el manifiesto en seals/chain.jsonl.
-        4. Verificar que los hashes encadenados (prevSealHash) son consistentes.
-        Verificación completa, incluidas las firmas (pide Python 3):
-           pip install cryptography
-           python3 verify_chain.py <esta carpeta>
-        (verify_chain.py está en la carpeta tools/ del proyecto PaleoRegistro.)
+        Hay dos niveles. Ambos se hacen sin la app, en un computador.
+
+        A. Revisión rápida (Mac o Linux, sin instalar nada)
+           Comprueba que ningún archivo sellado cambió ni falta.
+           1. Abra una terminal en esta carpeta (la que contiene VERIFY.txt).
+           2. Ejecute:   shasum -a 256 -c seals/SHA256SUMS
+           3. Cada línea debe terminar en "OK". Un "FAILED" indica un archivo
+              modificado; "No such file" indica uno que falta.
+           Esta revisión NO detecta archivos agregados ni comprueba las firmas
+           ni el orden de los sellos: para eso está el nivel B.
+
+        B. Verificación completa (firmas, cadena y archivos agregados)
+           Requiere Python 3 (incluido en macOS; en Windows, python.org).
+           1. Abra una terminal en esta carpeta.
+           2. Instale la librería de firmas, una sola vez:
+                 pip3 install cryptography
+           3. Ejecute:   python3 seals/verify_chain.py .
+           4. Debe terminar en "VERIFICACIÓN: OK". Si dice "FALLO", lista qué
+              archivo o qué sello no corresponde.
+           Para un peritaje: seals/verify_chain.py viaja dentro del expediente,
+           así que quien lo entregó pudo cambiarlo. Use de preferencia una copia
+           del verificador obtenida por otro medio (por ejemplo, del equipo que
+           desarrolló la app) y compare ambas con:
+                 shasum -a 256 seals/verify_chain.py
+
+        QUÉ HAY EN LA CARPETA seals/
+        ----------------------------
+        - chain.jsonl: un sello por línea, del primero al último. Cada uno
+          trae la lista de archivos con su huella SHA-256 ("manifest"), la
+          fecha, el autor, la clave pública y la firma.
+        - SHA256SUMS: la lista de huellas del último sello, para el nivel A.
+        - verify_chain.py: copia del verificador, para el nivel B.
 
         HASH RAÍZ DEL EXPEDIENTE
         ------------------------

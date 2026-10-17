@@ -43,6 +43,10 @@ en la app y `tools/verify_chain.py`.
   probar (M7).
 - [ ] **Custodia física de la pieza** (traspasos, actas de entrega): fuera del plan v1.
   La app custodia el registro digital, no el objeto.
+- [~] **VERIFY.txt suficiente para un tercero** (2026-10-17): dos niveles. Nivel A:
+  `shasum -a 256 -c seals/SHA256SUMS`, sin instalar nada. Nivel B:
+  `python3 seals/verify_chain.py .`, con firmas. La app copia el verificador a `seals/`
+  en cada sello. Falta probarlo en Mac (M8).
 - [ ] **Prueba con un tercero** (Fase 17): persona ajena verifica solo con `VERIFY.txt` y
   distingue un bundle manipulado entre tres.
 - `rfc3161Token` queda vacío por diseño (sin red). No es pendiente de v1.

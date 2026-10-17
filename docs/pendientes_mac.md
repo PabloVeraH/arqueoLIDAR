@@ -118,6 +118,19 @@ de `FindingDetailView`. En el iPhone:
 **Bien si:** ningún mensaje muestra términos internos (`hashMismatch`, `prevSealHash`…)
 fuera del desplegable.
 
+### M8 · 2026-10-17 · punto 1 de custodia · Verificación por un tercero sin la app
+Compila: `arqueoLidar/Resources/verify_chain.py` debe quedar dentro de la app (Xcode lo
+toma por la carpeta sincronizada; si no, agrégalo a "Copy Bundle Resources").
+`swift test` (2 pruebas nuevas en PersistenceTests). En el iPhone, sella un escaneo y
+copia el expediente a la Mac. Ahí:
+1. `seals/` contiene `chain.jsonl`, `SHA256SUMS` y `verify_chain.py`.
+2. En la carpeta del expediente, `shasum -a 256 -c seals/SHA256SUMS` → todo OK.
+3. `pip3 install cryptography && python3 seals/verify_chain.py .` → "VERIFICACIÓN: OK".
+4. Altera 1 byte de un `mesh.ply`: el paso 2 da FAILED y el 3 da FALLO con el archivo.
+5. Lee `VERIFY.txt` como si no conocieras la app: ¿basta para hacer 2 y 3 sin ayuda?
+**Bien si:** todo lo anterior. Si `verify_chain.py` no aparece en `seals/`, el recurso no
+quedó en la app.
+
 ## Resueltas
 
 _(vacío)_

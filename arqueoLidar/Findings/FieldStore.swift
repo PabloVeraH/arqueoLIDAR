@@ -150,11 +150,7 @@ nonisolated enum FieldStore {
         try writer.markSealed(scanDir: scanDir)
 
         let dir = findingDir(finding)
-        let seal = try await SealSigner().seal(bundleAt: dir, author: finding.author,
-                                               geo: representativeFix(fixes), previousSeal: lastSeal(dir),
-                                               key: key)
-        try writer.appendSeal(seal, to: dir)
-        try writer.writeVerifyDoc(to: dir, author: finding.author, rootHash: seal.rootHash)
+        let seal = try await sealAndRecord(finding, adding: [scanDir], key: key, geo: representativeFix(fixes))
         return SavedScan(scanID: scan.scanID, title: finding.title, folder: dir,
                          meshURL: scanDir.appendingPathComponent("mesh.ply"),
                          vertexCount: mesh.vertices.count, triangleCount: mesh.triangleCount,
@@ -197,20 +193,40 @@ nonisolated enum FieldStore {
         try FileManager.default.createDirectory(at: folder, withIntermediateDirectories: true)
         let file = folder.appendingPathComponent("MSR-\(measurement.measurementID.uuidString.prefix(8)).json")
         try CanonicalJSONEncoder().encode(measurement).write(to: file, options: .atomic)
-        let seal: SealRecord
-        do {
-            seal = try await SealSigner().seal(bundleAt: dir, author: finding.author, geo: nil,
-                                               previousSeal: lastSeal(dir), key: key)
-            try writer.appendSeal(seal, to: dir)
-        } catch {
-            // Sin sello, el archivo sería "añadido no declarado" y el expediente dejaría de verificar.
-            try? FileManager.default.removeItem(at: file)
-            throw error
-        }
-        try writer.writeVerifyDoc(to: dir, author: finding.author, rootHash: seal.rootHash)
+        _ = try await sealAndRecord(finding, adding: [file], key: key, geo: nil)
     }
 
     // MARK: - Custodia
+
+    /// Sella el expediente y deja junto a la cadena lo que necesita un tercero
+    /// para verificarlo sin la app (VERIFY.txt, seals/SHA256SUMS y una copia de
+    /// verify_chain.py). Si el sello no llega a escribirse, borra `newItems`:
+    /// sin sello serían archivos "añadidos no declarados".
+    private static func sealAndRecord(_ finding: Finding, adding newItems: [URL],
+                                      key: any SigningKey, geo: GeoFix?) async throws -> SealRecord {
+        let dir = findingDir(finding)
+        let seal: SealRecord
+        do {
+            seal = try await SealSigner().seal(bundleAt: dir, author: finding.author, geo: geo,
+                                               previousSeal: lastSeal(dir), key: key)
+            try writer.appendSeal(seal, to: dir)
+        } catch {
+            for url in newItems { try? FileManager.default.removeItem(at: url) }
+            throw error
+        }
+        try writer.writeVerifyDoc(to: dir, author: finding.author, rootHash: seal.rootHash)
+        try writer.writeChecksums(seal.manifest, to: dir)
+        copyVerifier(to: dir)
+        return seal
+    }
+
+    /// `seals/` no entra al manifiesto: la copia se puede renovar sin romper sellos.
+    private static func copyVerifier(to findingDir: URL) {
+        guard let source = Bundle.main.url(forResource: "verify_chain", withExtension: "py") else { return }
+        let target = findingDir.appendingPathComponent("seals/verify_chain.py")
+        try? FileManager.default.removeItem(at: target)
+        try? FileManager.default.copyItem(at: source, to: target)
+    }
 
     static func verify(_ finding: Finding) async -> CustodyVerdict {
         do { return try await ChainVerifier().verify(bundleAt: findingDir(finding)) }
