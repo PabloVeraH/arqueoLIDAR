@@ -358,6 +358,7 @@ struct RecordSidecarTests {
         let sidecar = try RecordSidecarBuilder.build(metadata: metadata, format: "ply")
         #expect(sidecar.disclaimer.contains("no constituye un levantamiento geodésico"))
         #expect(sidecar.disclaimer.contains("GPS"))
+        #expect(sidecar.disclaimer.contains("no validada"), "Fase 16: sin cifras de precisión sin validar")
     }
 }
 

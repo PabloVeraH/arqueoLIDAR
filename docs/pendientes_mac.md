@@ -181,6 +181,15 @@ con una persona ajena al proyecto. Antes: `python3 tools/test_preparar_prueba_te
 **Bien si:** la persona identifica el alterado en menos de 15 minutos, sin preguntar.
 Anota el resultado con la tabla de la guía en `registro_pruebas.md`.
 
+### M14 · 2026-10-17 · Corridas de validación en terreno (Fase 16)
+Seguir `docs/VALIDATION.md`: escanear objetos de valor conocido (caja medida, baldes,
+capas de arena, ensayo nulo, etc.), a la sombra y al sol, y anotar cada corrida en
+`docs/validation_log.csv`. Después:
+`python3 tools/validate_reference.py --escribir docs/VALIDATION.md` (la prueba
+`python3 tools/test_validate_reference.py` da 7/7 en Windows).
+**Bien si:** el resumen dice OK en todas las filas. Puede tomar varias jornadas: avanza
+por magnitud y sube la planilla cada vez.
+
 ## Resueltas
 
 _(vacío)_

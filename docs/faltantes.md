@@ -115,11 +115,16 @@ Solo se ejercitan en Diagnóstico (`ModuleSelfTests.swift`):
 
 ## 7. Validación en terreno (Fase 16)
 
-- [ ] `docs/validation_log.csv` y `docs/VALIDATION.md`: caja de medidas conocidas,
-  ensayo nulo de monitoreo, sombra vs. sol, sesgo GPS.
-- [ ] Hasta tener esas cifras, la UI y el sidecar deben decir "no validado".
+- [~] **Protocolo listo** (2026-10-17): `docs/VALIDATION.md` (qué medir, con qué referencia
+  y cuántas veces, en sombra y al sol), la planilla `docs/validation_log.csv` y
+  `tools/validate_reference.py`, que calcula sesgo, dispersión, banda ±2σ y el piso de
+  ruido del ensayo nulo, y escribe el resumen. Falta **hacer las corridas** con el iPhone
+  (M14).
+- [x] La app y `record.json` dicen "Precisión en terreno: no validada" (volumen y aviso legal
+  de cada exportación).
 - [ ] Pruebas pendientes de `docs/registro_pruebas.md` (exportar y re-verificar, dos sellos
-  encadenados, `verify_chain.py` en Mac, GPS denegado, sitios y borrado).
+  encadenados, `verify_chain.py` en Mac, GPS denegado, sitios y borrado): están en la cola
+  de `pendientes_mac.md`.
 
 ## Registro de avance
 

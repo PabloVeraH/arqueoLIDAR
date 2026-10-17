@@ -626,7 +626,10 @@ public struct RecordSidecar: Sendable, Codable, Equatable {
     public static let defaultDisclaimer =
         "Este registro se generó con GPS del dispositivo y no constituye un levantamiento " +
         "geodésico. Las mediciones métricas relativas provienen del sensor LiDAR; la " +
-        "ubicación absoluta tiene la precisión declarada del receptor GPS del iPhone."
+        "ubicación absoluta tiene la precisión declarada del receptor GPS del iPhone. " +
+        // Plan, Fase 16: ninguna cifra de precisión hasta medirla en terreno.
+        "Precisión en terreno: no validada todavía (ver docs/VALIDATION.md); los márgenes " +
+        "que aparezcan son de cálculo, no bandas de error medidas."
 
     public struct DeviceInfo: Sendable, Codable, Equatable {
         public var model: String
