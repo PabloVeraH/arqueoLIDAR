@@ -21,8 +21,39 @@ números se anotan en `docs/registro_pruebas.md`; aquí solo se marca el estado.
 ## Pendientes
 
 ### M1 · 2026-10-15 · `d44ac6f`, `8825f72` · Sitios, borrado protegido y Diagnóstico solo en Debug
-Seguir los pasos 3 y 4 de `docs/prompt_esteban.md`: compilar, probar sitios con GPS,
-borrar sitios y expedientes, y revisar Diagnóstico en Debug y en Release.
+Escrito en Windows, nunca compilado. Qué cambió: Terreno abre en `SitesListView`; se
+puede crear o editar un sitio (`SiteFormView`) con "Tomar ubicación con GPS"; un sitio se
+borra solo si no tiene hallazgos (`FieldStore.deleteSite`); `Site.location: GeoFix?`;
+cada hallazgo guarda `site.json` dentro del expediente; un hallazgo se borra solo si
+**no** verifica como íntegro (`FieldStore.deleteIfNotIntact`); la pestaña Diagnóstico
+existe solo en `#if DEBUG`.
+
+1. **Compilar:** `swift build && swift test` en `PaleoRegistro/`,
+   `Scripts/check_module_boundaries.sh`, `Scripts/test_module_boundaries.sh` y
+   `xcodebuild -project arqueoLidar.xcodeproj -scheme arqueoLidar -destination 'generic/platform=iOS' build`
+   (confirma el scheme con `xcodebuild -list`). Puntos de riesgo en `FieldViews.swift`:
+   los dos `.sheet` de `SitesListView`, el `if let` dentro de `.sheet`, el `if` dentro de
+   `.toolbar`, el init de `SiteFormView` con `State(initialValue:)`, el `@State` de
+   `LocationRecorder` dentro de `SiteFormView` y las interpolaciones en `Text`. No
+   silencies las advertencias de concurrencia con `@unchecked Sendable`.
+2. **Probar en el iPhone, instalando desde Xcode (Debug):**
+   a. Hay dos pestañas, Terreno y Diagnóstico. En Diagnóstico corre todas las pruebas:
+      deben pasar, y debe decir "Estructura de Trabajo" en lugar de "Domain".
+   b. Terreno muestra "Hallazgos sin sitio (N)" con los expedientes anteriores.
+   c. Crea un sitio al aire libre, toca "Tomar ubicación con GPS", espera lecturas y toca
+      "Usar esta ubicación": debe mostrar lat/lon/altura/precisión, y la fila ya no dice
+      "sin ubicación". Anota la precisión.
+   d. Desliza el sitio → Editar: cambia el nombre, vuelve a tomar el GPS y guarda.
+   e. Dentro del sitio: crea un hallazgo, escanea, guarda y verifica: debe dar Íntegro.
+   f. Edita el sitio de nuevo, vuelve al hallazgo y verifica: debe seguir Íntegro.
+   g. Eliminar un sitio con hallazgos → "No se eliminó". Un sitio vacío sí se elimina.
+   h. En "Hallazgos sin sitio": uno con sellos inválidos (23:04, 23:06, 23:15) se borra;
+      FND-D820CF5D (íntegro) → "No se eliminó".
+   i. En Archivos → En mi iPhone → ArqueoLiDAR: existe `Sites/SIT-….json`, y el hallazgo
+      nuevo tiene `Findings/FND-…/site.json`.
+   j. En Release (Edit Scheme → Run → Build Configuration → Release), la app abre directo
+      en Sitios, sin pestañas ni Diagnóstico.
+
 **Bien si:** compila sin errores y los pasos a–j dan lo esperado.
 
 ### M2 · 2026-10-17 · `3d63b17` · Compilar y testear la firma v2 (paquete)
