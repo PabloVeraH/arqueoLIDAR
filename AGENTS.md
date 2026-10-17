@@ -13,6 +13,25 @@ con su propio asistente. Sigue esto **siempre, antes de escribir código**.
 4. Lee los commits nuevos (`git log -p HEAD@{1}..HEAD` o `git show <sha>`) para saber qué
    cambió.
 
+## 1b. ¿Dónde estás corriendo? (Mac vs. Windows)
+
+Algunas tareas solo se pueden hacer en una Mac: compilar con Xcode o `swift`, correr
+`swift test`, instalar en el iPhone y probar ARKit, LiDAR, Face ID o el chip seguro. La cola
+de esas tareas es `docs/pendientes_mac.md`. Es distinta de `docs/faltantes.md`, que tiene
+los pendientes generales de la app.
+
+Comprueba el sistema operativo (`uname -s`, o la plataforma que te informa tu entorno):
+
+- **macOS (`Darwin`):** después de sincronizar, **lee primero `docs/pendientes_mac.md`** y
+  haz sus tareas pendientes en orden, antes de lo que te pidieron (salvo que el usuario
+  diga otra cosa). Cuando resuelvas una, muévela a "Resueltas" en ese archivo, en el mismo
+  commit que el arreglo. Los resultados con números van a `docs/registro_pruebas.md`.
+- **Windows o Linux:** si escribes o cambias algo que no puedes compilar ni probar aquí
+  (código de la app iOS, frameworks de Apple, el paquete Swift sin toolchain), agrega
+  una tarea a `docs/pendientes_mac.md` en el mismo commit. Pon qué cambió, en qué commit
+  y cómo se sabe que está bien. Al tomar una decisión de programación que solo se
+  valida en Mac o iPhone, déjala anotada ahí. Nunca la marques como probada.
+
 ## 2. ¿Lo que te pidieron ya viene hecho?
 
 Antes de implementar la tarea, busca si los commits recién bajados (o el código actual)
