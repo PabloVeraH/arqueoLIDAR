@@ -136,6 +136,8 @@ public struct ScanSession: Sendable, Codable, Equatable {
     public var siteAlignment: Matrix4x4
     public var sealed: Bool
     public var sealedAt: Date?
+    /// Objeto marcado con la mira durante la captura (nil en escaneos antiguos).
+    public var objectMark: ObjectMark?
 
     public init(
         scanID: UUID = UUID(),
@@ -148,7 +150,8 @@ public struct ScanSession: Sendable, Codable, Equatable {
         georeferenceQuality: GeoreferenceQuality = .unvalidated,
         siteAlignment: Matrix4x4 = Matrix4x4.identity,
         sealed: Bool = false,
-        sealedAt: Date? = nil
+        sealedAt: Date? = nil,
+        objectMark: ObjectMark? = nil
     ) {
         self.scanID = scanID
         self.findingID = findingID
@@ -161,6 +164,19 @@ public struct ScanSession: Sendable, Codable, Equatable {
         self.siteAlignment = siteAlignment
         self.sealed = sealed
         self.sealedAt = sealedAt
+        self.objectMark = objectMark
+    }
+}
+
+/// Punto del objeto (coordenadas de mundo de la captura, +Y arriba) y radio
+/// aproximado. Es la caja inicial para medir; el operador la ajusta después.
+public struct ObjectMark: Sendable, Codable, Equatable {
+    public var center: SIMD3<Float>
+    public var radius: Float
+
+    public init(center: SIMD3<Float>, radius: Float) {
+        self.center = center
+        self.radius = radius
     }
 }
 
@@ -175,6 +191,8 @@ public struct Measurement: Sendable, Codable, Equatable {
     public var isInferred: Bool
     public var uncertainty: Double?
     public var assumptions: [String]?
+    /// Qué se informa, en palabras ("Volumen sobre el suelo", "Volumen faltante").
+    public var label: String?
 
     public init(
         measurementID: UUID = UUID(),
@@ -185,7 +203,8 @@ public struct Measurement: Sendable, Codable, Equatable {
         method: String,
         isInferred: Bool,
         uncertainty: Double? = nil,
-        assumptions: [String]? = nil
+        assumptions: [String]? = nil,
+        label: String? = nil
     ) {
         self.measurementID = measurementID
         self.scanID = scanID
@@ -196,6 +215,7 @@ public struct Measurement: Sendable, Codable, Equatable {
         self.isInferred = isInferred
         self.uncertainty = uncertainty
         self.assumptions = assumptions
+        self.label = label
     }
 }
 

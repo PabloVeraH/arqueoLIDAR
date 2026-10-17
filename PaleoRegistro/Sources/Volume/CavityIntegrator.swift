@@ -168,7 +168,8 @@ public struct CavityIntegrator: VolumeIntegrating {
             negative: cavity * cellArea,
             coveredArea: Double(covered.count) * cellArea,
             filledCellRatio: 1,
-            uncertainty: Double(cellSize) * 0.5,
+            // Media celda de error por columna, en m³ (antes salía en metros).
+            uncertainty: 0.5 * Double(cellSize) * Double(covered.count) * cellArea,
             method: method,
             isInferred: true,
             algorithmVersion: Self.algorithmVersion
@@ -210,7 +211,8 @@ public struct CavityIntegrator: VolumeIntegrating {
             negative: cavity * cellArea,
             coveredArea: Double(lower.count) * cellArea,
             filledCellRatio: 1,
-            uncertainty: Double(cellSize) * 0.5,
+            // Media celda de error por columna, en m³ (antes salía en metros).
+            uncertainty: 0.5 * Double(cellSize) * Double(lower.count) * cellArea,
             method: method,
             isInferred: true,
             algorithmVersion: Self.algorithmVersion
@@ -278,7 +280,8 @@ public struct CavityIntegrator: VolumeIntegrating {
             negative: cavity * cellArea,
             coveredArea: Double(covered.count) * cellArea,
             filledCellRatio: 1,
-            uncertainty: Double(cellSize) * 0.5,
+            // Media celda de error por columna, en m³ (antes salía en metros).
+            uncertainty: 0.5 * Double(cellSize) * Double(covered.count) * cellArea,
             method: .mirrorSymmetry,
             isInferred: true,
             algorithmVersion: Self.algorithmVersion

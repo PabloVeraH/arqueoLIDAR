@@ -124,8 +124,9 @@ public struct SignedHeightFieldIntegrator: VolumeIntegrating {
         let total = Self.bboxCellCount(covered)
         let ratio = total > 0 ? Double(filled) / Double(total) : 0
 
-        // Incertidumbre: media celda de error de discretización por columna.
-        let uncertainty = 0.5 * Double(cellSize) * Double(covered.count)
+        // Incertidumbre: media celda de error de discretización por columna, en m³
+        // (altura × área de la columna). Sin el área salía en metros.
+        let uncertainty = 0.5 * Double(cellSize) * Double(covered.count) * cellArea
 
         return VolumeResult(
             positive: volPositive,

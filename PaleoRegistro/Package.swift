@@ -46,7 +46,7 @@ let package = Package(
         .target(name: "Mesh", dependencies: ["Domain"]),
 
         // F5
-        .target(name: "Volume", dependencies: ["Domain", "Mesh"]),
+        .target(name: "Volume", dependencies: ["Domain", "Mesh", "Geometry"]),
 
         // F6
         .target(name: "Stratigraphy", dependencies: ["Domain", "Geometry"]),
@@ -81,7 +81,7 @@ let package = Package(
         .testTarget(name: "DomainTests", dependencies: ["Domain"]),
         .testTarget(name: "GeometryTests", dependencies: ["Geometry", "Domain"]),
         .testTarget(name: "MeshTests", dependencies: ["Mesh", "Domain"]),
-        .testTarget(name: "VolumeTests", dependencies: ["Volume", "Mesh", "Domain"]),
+        .testTarget(name: "VolumeTests", dependencies: ["Volume", "Mesh", "Geometry", "Domain"]),
         .testTarget(name: "StratigraphyTests", dependencies: ["Stratigraphy", "Geometry", "Domain"]),
         .testTarget(name: "SegmentationTests", dependencies: ["Segmentation", "Geometry", "Mesh", "Domain"]),
         .testTarget(name: "GeoTests", dependencies: ["Geo", "Domain"]),

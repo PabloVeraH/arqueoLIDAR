@@ -681,3 +681,99 @@ struct CavityTests {
         #expect(level3.isInferred == true)
     }
 }
+
+@Suite("F5/F14 Volume: medición en la ficha (medido vs. inferido)")
+struct VolumeMeasurerTests {
+
+    let scanID = UUID()
+
+    func box(center: SIMD3<Float>, half: SIMD3<Float>) throws -> OrientedBox {
+        try OrientedBox(center: center, axes: .identity, halfExtents: half)
+    }
+
+    @Test("Montículo sobre el suelo: campo de alturas, MEDIDO, < 5% e incertidumbre en m³")
+    func moundIsMeasured() throws {
+        let R: Float = 0.5, H: Float = 0.5
+        let mesh = VolFixtures.heightField(half: 1.0, grid: 160) { x, z in
+            max(0, H * (1 - (x * x + z * z).squareRoot() / R))
+        }
+        let m = try VolumeMeasurer.measure(
+            mesh: mesh, region: box(center: SIMD3(0, 0.25, 0), half: SIMD3(0.9, 0.5, 0.9)),
+            purpose: .baseline, scanID: scanID)
+        let expected = Double.pi * Double(R * R * H) / 3
+        let above = try #require(m.measurements.first)
+        #expect(above.label == "Volumen sobre el suelo")
+        #expect(above.isInferred == false)
+        #expect(!m.isInferred)
+        #expect(abs(above.value - expected) / expected < 0.05, "\(above.value) vs \(expected)")
+        #expect(m.measurements[1].value < expected * 0.02, "bajo el suelo debería ser ~0")
+        #expect(abs(m.reference?.normal.y ?? 0) > 0.99 && (m.reference?.normal.y ?? 0) > 0)
+        // ~3,2 m² × media celda (5 mm) ≈ 0,016 m³. Antes del arreglo de unidades daba ~160.
+        #expect(m.result.uncertainty < 0.05, "incertidumbre \(m.result.uncertainty)")
+    }
+
+    @Test("Mordisco en una superficie: cavidad, INFERIDO, < 5%")
+    func biteIsInferred() throws {
+        let r: Float = 0.25
+        let mesh = VolFixtures.surfaceWithHemisphericalBite(
+            half: 0.5, grid: 96, height: 1, biteRadius: r, biteCenter: SIMD3(0, 1, 0))
+        let m = try VolumeMeasurer.measure(
+            mesh: mesh, region: box(center: SIMD3(0, 0.9, 0), half: SIMD3(0.45, 0.4, 0.45)),
+            purpose: .damageAssessment, scanID: scanID)
+        let expected = 2.0 / 3.0 * Double.pi * Double(r * r * r)
+        let lost = try #require(m.measurements.first)
+        #expect(lost.isInferred == true)
+        #expect(m.isInferred)
+        #expect(lost.assumptions?.isEmpty == false)
+        #expect((m.reference?.normal.y ?? 0) > 0.99, "la superficie intacta debe mirar hacia afuera")
+        #expect(abs(lost.value - expected) / expected < 0.05, "\(lost.value) vs \(expected)")
+    }
+
+    @Test("Sólido ya estanco: MEDIDO, sin tapar nada")
+    func watertightSolidIsMeasured() throws {
+        let mesh = VolFixtures.sphere(radius: 0.2, latDiv: 64, lonDiv: 128)
+        let m = try VolumeMeasurer.measure(
+            mesh: mesh, region: box(center: .zero, half: SIMD3(0.5, 0.5, 0.5)),
+            purpose: .specimenInventory, scanID: scanID)
+        let expected = 4.0 / 3.0 * Double.pi * 0.008
+        let v = try #require(m.measurements.first)
+        #expect(v.isInferred == false)
+        #expect(abs(v.value - expected) / expected < 0.02, "\(v.value) vs \(expected)")
+    }
+
+    @Test("Domo abierto sobre el suelo: se tapa la base, INFERIDO")
+    func openSolidIsInferred() throws {
+        let r: Float = 0.3
+        let dome = VolFixtures.openUpperHemisphere(radius: r, latDiv: 48, lonDiv: 96)
+        let ground = VolFixtures.flatSurface(half: 0.6, grid: 48, height: 0)
+        let m = try VolumeMeasurer.measure(
+            mesh: VolFixtures.combine(dome, ground),
+            region: box(center: SIMD3(0, 0.2, 0), half: SIMD3(0.55, 0.4, 0.55)),
+            purpose: .specimenInventory, scanID: scanID)
+        let expected = 2.0 / 3.0 * Double.pi * Double(r * r * r)
+        let v = try #require(m.measurements.first)
+        #expect(v.isInferred == true)
+        #expect(v.assumptions?.first?.contains("aristas abiertas") == true)
+        #expect(abs(v.value - expected) / expected < 0.05, "\(v.value) vs \(expected)")
+    }
+
+    @Test("Caja vacía: error claro, nunca un número")
+    func emptyRegionThrows() throws {
+        let mesh = VolFixtures.flatSurface(half: 0.5, grid: 8, height: 0)
+        #expect(throws: VolumeError.self) {
+            try VolumeMeasurer.measure(mesh: mesh, region: try box(center: SIMD3(5, 5, 5), half: SIMD3(0.1, 0.1, 0.1)),
+                                       purpose: .baseline, scanID: scanID)
+        }
+    }
+
+    @Test("La medición se guarda y se lee igual (JSON)")
+    func codableRoundTrip() throws {
+        let mesh = VolFixtures.surfaceWithHemisphericalBite(
+            half: 0.5, grid: 32, height: 1, biteRadius: 0.2, biteCenter: SIMD3(0, 1, 0))
+        let m = try VolumeMeasurer.measure(
+            mesh: mesh, region: box(center: SIMD3(0, 0.9, 0), half: SIMD3(0.45, 0.4, 0.45)),
+            purpose: .damageAssessment, scanID: scanID, clock: Date(timeIntervalSince1970: 1_700_000_000))
+        let back = try JSONDecoder().decode(VolumeMeasurement.self, from: JSONEncoder().encode(m))
+        #expect(back == m)
+    }
+}
