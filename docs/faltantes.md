@@ -35,7 +35,9 @@ en la app y `tools/verify_chain.py`.
   documenta, no se resuelve en v1.
 - [ ] **WORM real**: hoy solo se escribe `.sealed`; el directorio sellado no queda de solo
   lectura.
-- [ ] **Sellar antes / después de una intervención**: hoy solo se sella al guardar un escaneo.
+- [~] **Sellar antes / después de una intervención** (2026-10-17): botón «Sellar estado
+  actual» en la ficha del hallazgo. Guarda `notes/NOTE-….json` (momento + nota) y lo
+  sella con Face ID y el GPS del momento. Aparece en el historial. Falta probarlo (M10).
 - [ ] **Reemplazar un escaneo** (`supersedes`): el modelo lo admite, la app no lo ofrece.
 - [~] **Custodia entendible para el usuario** (2026-10-17): los errores de verificación
   ahora se leen como frases claras (`CustodyText`), con el detalle técnico plegado, y

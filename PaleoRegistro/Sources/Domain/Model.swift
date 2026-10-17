@@ -180,6 +180,28 @@ public struct ObjectMark: Sendable, Codable, Equatable {
     }
 }
 
+/// Sello a propósito, sin escaneo nuevo: deja constancia del estado del
+/// expediente en un momento (antes o después de intervenir el hallazgo).
+public struct CustodyNote: Sendable, Codable, Equatable {
+    public var noteID: UUID
+    public var kind: CustodyNoteKind
+    public var text: String
+    public var createdAt: Date
+
+    public init(noteID: UUID = UUID(), kind: CustodyNoteKind, text: String, createdAt: Date = Date()) {
+        self.noteID = noteID
+        self.kind = kind
+        self.text = text
+        self.createdAt = createdAt
+    }
+}
+
+public enum CustodyNoteKind: String, Sendable, Codable, CaseIterable {
+    case beforeIntervention
+    case afterIntervention
+    case checkpoint
+}
+
 /// Mediciones de un espécimen: dimensiones, volumen, potencia, distancia.
 public struct Measurement: Sendable, Codable, Equatable {
     public var measurementID: UUID

@@ -140,6 +140,17 @@ revisa el último sello en `seals/chain.jsonl`: debe tener `"signatureVersion":3
 **Bien si:** todo verde. Si la firma v3 falla solo en el iPhone, sospecha de una
 diferencia entre lo que se firma (`SealPayload.bytes`) y lo que escribe `appendSeal`.
 
+### M10 · 2026-10-17 · punto 3 de custodia · Sellar antes / después de intervenir
+Compila `UI/CustodyViews.swift` y los `label` ahora `nonisolated` de `FieldStore.swift`
+(los usa `CustodyText`, que es `nonisolated`; si el compilador se queja de aislamiento,
+es aquí). En el iPhone, en un hallazgo con escaneos:
+1. «Sellar estado actual» → "Antes de intervenir" + nota → Sellar → pide Face ID.
+2. El historial muestra «Sello «Antes de intervenir»: <nota>» con fecha. Verificar → Íntegro.
+3. Al aire libre, el último sello en `chain.jsonl` lleva `geo` y `gnssTime`; bajo techo,
+   sin GPS, igual sella.
+4. Cancelar Face ID → no queda `notes/NOTE-….json` suelto; el expediente sigue Íntegro.
+**Bien si:** todo lo anterior.
+
 ## Resueltas
 
 _(vacío)_

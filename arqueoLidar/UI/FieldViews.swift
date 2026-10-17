@@ -342,6 +342,8 @@ struct FindingDetailView: View {
     let finding: Finding
     @State private var scans: [ScanEntry] = []
     @State private var history: [SealChange] = []
+    @State private var notes: [String: CustodyNote] = [:]
+    @State private var showSealNote = false
     @State private var showCapture = false
     @State private var verdict: CustodyVerdict?
     @State private var verifying = false
@@ -390,6 +392,12 @@ struct FindingDetailView: View {
                     Label(verifying ? "Verificando…" : "Verificar expediente", systemImage: "checkmark.shield")
                 }
                 .disabled(verifying || scans.isEmpty)
+                Button {
+                    showSealNote = true
+                } label: {
+                    Label("Sellar estado actual (antes / después de intervenir)", systemImage: "checkmark.seal")
+                }
+                .disabled(scans.isEmpty)
                 ShareLink(item: FieldStore.findingDir(finding)) {
                     Label("Compartir expediente completo", systemImage: "folder")
                 }
@@ -425,7 +433,7 @@ struct FindingDetailView: View {
                         VStack(alignment: .leading, spacing: 3) {
                             Text("Sello N.º \(change.seal.index + 1) · \(change.seal.wallClock.formatted(date: .abbreviated, time: .shortened))")
                                 .font(.subheadline.weight(.semibold))
-                            ForEach(CustodyText.sealedItems(change, scans: scans), id: \.self) {
+                            ForEach(CustodyText.sealedItems(change, scans: scans, notes: notes), id: \.self) {
                                 Text($0).font(.caption)
                             }
                             Text(CustodyText.signature(change.seal)).font(.caption2).foregroundStyle(.secondary)
@@ -446,12 +454,16 @@ struct FindingDetailView: View {
         .fullScreenCover(isPresented: $showCapture, onDismiss: reload) {
             CaptureView(finding: finding)
         }
+        .sheet(isPresented: $showSealNote) {
+            CustodySealView(finding: finding, onSealed: reload)
+        }
         .onAppear(perform: reload)
     }
 
     private func reload() {
         scans = FieldStore.scans(of: finding)
         history = FieldStore.sealHistory(finding)
+        notes = FieldStore.notes(finding)
         verdict = nil
     }
 }

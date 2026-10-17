@@ -16,6 +16,8 @@ nonisolated enum CustodyText {
         switch parts.first ?? "" {
         case "finding.json": return "la ficha del hallazgo"
         case "site.json": return "la copia de la ficha del sitio"
+        case "notes":
+            return "la nota de custodia \((parts.last ?? "").replacingOccurrences(of: ".json", with: ""))"
         case "measurements":
             return "la medición de volumen \((parts.last ?? "").replacingOccurrences(of: ".json", with: ""))"
         case "scans" where parts.count >= 3:
@@ -34,7 +36,8 @@ nonisolated enum CustodyText {
     }
 
     /// Qué incorporó un sello, en una línea por cosa (escaneo, medición, ficha).
-    static func sealedItems(_ change: SealChange, scans: [ScanEntry]) -> [String] {
+    static func sealedItems(_ change: SealChange, scans: [ScanEntry],
+                            notes: [String: CustodyNote] = [:]) -> [String] {
         var items: [String] = []
         let added = Set(change.added)
         if added.contains("finding.json") { items.append("Apertura del expediente (ficha del hallazgo y del sitio)") }
@@ -43,6 +46,8 @@ nonisolated enum CustodyText {
             let parts = path.split(separator: "/").map(String.init)
             if parts.first == "scans", parts.count >= 3, seenScans.insert(parts[1]).inserted {
                 items.append("Escaneo nuevo: \(scanName(parts[1], scans: scans).replacingOccurrences(of: "del escaneo ", with: ""))")
+            } else if parts.first == "notes", let note = notes[parts.last ?? ""] {
+                items.append("Sello «\(note.kind.label)»: \(note.text)")
             } else if parts.first == "measurements" {
                 items.append("Medición nueva: " + describe(path: path, scans: scans).replacingOccurrences(of: "la medición de volumen ", with: "volumen "))
             }

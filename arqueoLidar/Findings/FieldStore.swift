@@ -196,6 +196,27 @@ nonisolated enum FieldStore {
         _ = try await sealAndRecord(finding, adding: [file], key: key, geo: nil)
     }
 
+    // MARK: - Notas de custodia
+
+    /// Notas selladas del expediente, por nombre de archivo (`NOTE-….json`).
+    static func notes(_ finding: Finding) -> [String: CustodyNote] {
+        let dir = findingDir(finding).appendingPathComponent("notes")
+        let files = (try? FileManager.default.contentsOfDirectory(at: dir, includingPropertiesForKeys: nil)) ?? []
+        return Dictionary(files.compactMap { url in load(CustodyNote.self, from: url).map { (url.lastPathComponent, $0) } },
+                          uniquingKeysWith: { a, _ in a })
+    }
+
+    /// Sella el expediente tal como está, con una nota (antes / después de
+    /// intervenir) y la ubicación GPS del momento si la hay.
+    static func sealNote(_ note: CustodyNote, geo: GeoFix?, finding: Finding) async throws {
+        let key = try await SealingKeyStore.key(reason: "Sellar «\(note.kind.label)» en «\(finding.title)»")
+        let folder = findingDir(finding).appendingPathComponent("notes")
+        try FileManager.default.createDirectory(at: folder, withIntermediateDirectories: true)
+        let file = folder.appendingPathComponent("NOTE-\(note.noteID.uuidString.prefix(8)).json")
+        try CanonicalJSONEncoder().encode(note).write(to: file, options: .atomic)
+        _ = try await sealAndRecord(finding, adding: [file], key: key, geo: geo)
+    }
+
     // MARK: - Custodia
 
     /// Sella el expediente y deja junto a la cadena lo que necesita un tercero
@@ -303,7 +324,7 @@ nonisolated enum FieldStore {
 }
 
 extension ScanPurpose {
-    var label: String {
+    nonisolated var label: String {
         switch self {
         case .baseline: "Registro inicial"
         case .postIntervention: "Post-intervención"
@@ -316,8 +337,18 @@ extension ScanPurpose {
     }
 }
 
+extension CustodyNoteKind {
+    nonisolated var label: String {
+        switch self {
+        case .beforeIntervention: "Antes de intervenir"
+        case .afterIntervention: "Después de intervenir"
+        case .checkpoint: "Control"
+        }
+    }
+}
+
 extension GeoreferenceQuality {
-    var label: String {
+    nonisolated var label: String {
         switch self {
         case .good: "GPS bueno"
         case .degraded: "GPS degradado"
