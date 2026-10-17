@@ -103,6 +103,21 @@ escena en `onAppear`) y que los cuatro botones de la captura quepan en un iPhone
 **Bien si:** las etiquetas salen como se describe. Anota en `registro_pruebas.md` los
 valores contra la huincha (esto alimenta la Fase 16).
 
+### M7 · 2026-10-17 · `4989ca7`, `734b4de` · Custodia en palabras e historial de sellos
+`swift test` (suite "historial de sellos", 2 pruebas; las de custodia existentes deben
+seguir verdes con el nuevo `CustodyError.fileMissing`). Compila la app; punto de riesgo:
+`Findings/CustodyText.swift` (expresiones `switch`) y el `ForEach(history.reversed(), …)`
+de `FindingDetailView`. En el iPhone:
+1. Un hallazgo con 2 escaneos y 1 medición → "Historial de sellos (3)": el más reciente
+   arriba, cada uno dice qué incorporó y "Firmado con el chip seguro…".
+2. Copia el expediente a la Mac, altera 1 byte de un `mesh.ply`, devuélvelo con Archivos
+   y toca Verificar → "Se modificó el modelo 3D del escaneo «…» del …". El desplegable
+   "Detalle técnico" muestra la ruta exacta.
+3. Borra un `geo.json` → "Falta las lecturas GPS del escaneo…". Agrega un archivo
+   cualquiera a la carpeta → "Se agregó el archivo … sin sellarlo".
+**Bien si:** ningún mensaje muestra términos internos (`hashMismatch`, `prevSealHash`…)
+fuera del desplegable.
+
 ## Resueltas
 
 _(vacío)_

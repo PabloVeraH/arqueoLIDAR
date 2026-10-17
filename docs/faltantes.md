@@ -37,6 +37,12 @@ en la app y `tools/verify_chain.py`.
   lectura.
 - [ ] **Sellar antes / después de una intervención**: hoy solo se sella al guardar un escaneo.
 - [ ] **Reemplazar un escaneo** (`supersedes`): el modelo lo admite, la app no lo ofrece.
+- [~] **Custodia entendible para el usuario** (2026-10-17): los errores de verificación
+  ahora se leen como frases claras (`CustodyText`), con el detalle técnico plegado, y
+  la ficha del hallazgo tiene un historial de sellos (`SealHistory`). Falta compilar y
+  probar (M7).
+- [ ] **Custodia física de la pieza** (traspasos, actas de entrega): fuera del plan v1.
+  La app custodia el registro digital, no el objeto.
 - [ ] **Prueba con un tercero** (Fase 17): persona ajena verifica solo con `VERIFY.txt` y
   distingue un bundle manipulado entre tres.
 - `rfc3161Token` queda vacío por diseño (sin red). No es pendiente de v1.
@@ -104,3 +110,4 @@ Solo se ejercitan en Diagnóstico (`ModuleSelfTests.swift`):
 | 2026-10-17 | Inventario inicial | — | 21f8258 |
 | 2026-10-17 | Firma v2, rotación declarada, chip seguro + Face ID/código, cancelar sin perder la malla | [~] sin compilar; falta prueba en iPhone | 3d63b17, fbe49da |
 | 2026-10-17 | Volumen medido vs. inferido en la ficha; marcar objeto al capturar; incertidumbre de volumen en m³ (bug) | [~] sin compilar; falta prueba en iPhone | c0f48bd, 48c4570 |
+| 2026-10-17 | Errores de custodia en palabras de terreno; historial de sellos | [~] sin compilar; falta prueba en iPhone | 4989ca7, 734b4de |

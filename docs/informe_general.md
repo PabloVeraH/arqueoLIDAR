@@ -61,7 +61,9 @@ Sitios → Hallazgos del sitio → Ficha del hallazgo → Escaneo → Visor 3D y
 
 ### 7. Verificar el expediente
 
-- Comprueba la **cadena de custodia**: dice "Íntegro" o lista qué archivo cambió, falta o sobra.
+- Comprueba la **cadena de custodia**: dice "Íntegro" o explica en palabras qué cambió, falta o sobra. Por ejemplo: "Se modificó el modelo 3D del escaneo «Registro inicial» del 14 oct 2026 después de sellarse". Un desplegable "Detalle técnico" guarda el dato exacto para un perito.
+- El **historial de sellos** muestra cada sello con su fecha y hora, qué incorporó (apertura del expediente, escaneo nuevo, medición nueva), con qué clave se firmó y si hubo un cambio de clave (otro iPhone).
+- Ojo: la custodia protege el **registro digital** (escaneos, GPS, fichas y mediciones). No sigue a la pieza física: quién la tiene o adónde se trasladó se documenta aparte, con las actas que pida el CMN.
 - El expediente completo se puede compartir y verificar en un computador **sin la app** con `tools/verify_chain.py`.
 
 ### Lo que la app todavía no hace

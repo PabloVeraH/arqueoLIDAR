@@ -85,3 +85,7 @@ En el iPhone:
 
 Sin compilar. Pasos en `docs/pendientes_mac.md` (M5 compilar y testear, M6 en el iPhone).
 Anotar aquí los volúmenes contra la huincha: valor de la app, valor real, MEDIDO/INFERIDO.
+
+### Pendiente: custodia en palabras e historial de sellos (2026-10-17, `4989ca7`, `734b4de`)
+
+Sin compilar. Pasos en `docs/pendientes_mac.md` (M7).
