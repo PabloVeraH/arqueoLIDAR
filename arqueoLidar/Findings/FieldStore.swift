@@ -5,6 +5,7 @@ import Geo
 import Custody
 import Persistence
 import Export
+import Volume
 
 // ═══════════════════════════════════════════════════════════════════════════════
 // Puente entre la interfaz de terreno y el paquete PaleoRegistro: crea
@@ -123,7 +124,7 @@ nonisolated enum FieldStore {
     /// Fusiona los trozos de malla de ARKit, guarda el escaneo con la serie GPS
     /// completa y sella el expediente (nuevo eslabón en seals/chain.jsonl).
     static func saveScan(parts: [MeshPart], fixes: [GeoFix], purpose: ScanPurpose,
-                         finding: Finding) async throws -> SavedScan {
+                         mark: ObjectMark?, finding: Finding) async throws -> SavedScan {
         let merged = MeshMergerCore().merge(parts: parts)
         guard !merged.isEmpty else {
             throw FieldError("No hay malla para guardar. Recorre la zona con la cámara hasta ver el wireframe.")
@@ -135,7 +136,7 @@ nonisolated enum FieldStore {
 
         let verdict = FixQualityGate().evaluate(burst: fixes)
         let scan = ScanSession(findingID: finding.findingID, purpose: purpose,
-                               georeferenceQuality: verdict.quality)
+                               georeferenceQuality: verdict.quality, objectMark: mark)
 
         let scanDir = try writer.createScanDir(scan, findingID: finding.findingID)
         try writer.writeMesh(mesh, to: scanDir)
@@ -173,6 +174,40 @@ nonisolated enum FieldStore {
     static func representativeFix(_ fixes: [GeoFix]) -> GeoFix? {
         FixQualityGate().evaluate(burst: fixes).chosenFix
             ?? fixes.min { $0.horizontalAccuracy < $1.horizontalAccuracy }
+    }
+
+    // MARK: - Mediciones
+
+    /// Mediciones de volumen guardadas para un escaneo (`measurements/` del expediente).
+    static func measurements(of entry: ScanEntry, finding: Finding) -> [VolumeMeasurement] {
+        let dir = findingDir(finding).appendingPathComponent("measurements")
+        let files = (try? FileManager.default.contentsOfDirectory(at: dir, includingPropertiesForKeys: nil)) ?? []
+        return files.compactMap { load(VolumeMeasurement.self, from: $0) }
+            .filter { $0.scanID == entry.scan.scanID }
+            .sorted { $0.measuredAt < $1.measuredAt }
+    }
+
+    /// Guarda la medición en `measurements/MSR-….json` (fuera del escaneo sellado,
+    /// que no se toca) y la sella como un eslabón nuevo de la cadena.
+    static func saveMeasurement(_ measurement: VolumeMeasurement, finding: Finding) async throws {
+        // Face ID o código antes de escribir nada (ver SealingKeyStore).
+        let key = try await SealingKeyStore.key(reason: "Sellar la medición de «\(finding.title)»")
+        let dir = findingDir(finding)
+        let folder = dir.appendingPathComponent("measurements")
+        try FileManager.default.createDirectory(at: folder, withIntermediateDirectories: true)
+        let file = folder.appendingPathComponent("MSR-\(measurement.measurementID.uuidString.prefix(8)).json")
+        try CanonicalJSONEncoder().encode(measurement).write(to: file, options: .atomic)
+        let seal: SealRecord
+        do {
+            seal = try await SealSigner().seal(bundleAt: dir, author: finding.author, geo: nil,
+                                               previousSeal: lastSeal(dir), key: key)
+            try writer.appendSeal(seal, to: dir)
+        } catch {
+            // Sin sello, el archivo sería "añadido no declarado" y el expediente dejaría de verificar.
+            try? FileManager.default.removeItem(at: file)
+            throw error
+        }
+        try writer.writeVerifyDoc(to: dir, author: finding.author, rootHash: seal.rootHash)
     }
 
     // MARK: - Custodia

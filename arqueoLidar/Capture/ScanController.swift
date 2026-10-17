@@ -31,6 +31,9 @@ final class ScanController {
     // Prueba de ruido del sensor (criterio de aceptación de F3)
     private(set) var noiseResult: String?
 
+    /// Objeto marcado con la mira: caja inicial para medir el volumen después.
+    private(set) var objectMark: ObjectMark?
+
     init() {
         sceneView.delegate = wireframe
         sceneView.automaticallyUpdatesLighting = false
@@ -55,6 +58,7 @@ final class ScanController {
         sceneView.session.run(config, options: [.resetTracking, .removeExistingAnchors])
         isRunning = true
         noiseResult = nil
+        objectMark = nil // las coordenadas del mundo anterior ya no valen
     }
 
     /// Reanuda tras una pausa SIN borrar la malla (p. ej. si se canceló Face ID
@@ -127,14 +131,10 @@ final class ScanController {
     /// en ese plano. Si una parte importante de los puntos queda fuera, la zona
     /// no es plana (esquina, objetos) y el número no representa ruido del sensor.
     func measureSurfaceNoise(radius: Float = 0.2) {
-        let center = CGPoint(x: sceneView.bounds.midX, y: sceneView.bounds.midY)
-        guard let frame = sceneView.session.currentFrame,
-              let query = sceneView.raycastQuery(from: center, allowing: .estimatedPlane, alignment: .any),
-              let hit = sceneView.session.raycast(query).first else {
+        guard let frame = sceneView.session.currentFrame, let target = crosshairTarget() else {
             noiseResult = "Apunta la mira a una pared o superficie plana y vuelve a intentar."
             return
         }
-        let target = SIMD3<Float>(hit.worldTransform.columns.3.x, hit.worldTransform.columns.3.y, hit.worldTransform.columns.3.z)
         let cam = frame.camera.transform.columns.3
         let distance = simd_distance(target, SIMD3<Float>(cam.x, cam.y, cam.z))
 
@@ -167,5 +167,24 @@ final class ScanController {
         } catch {
             noiseResult = "No se encontró un plano bajo la mira. Apunta a una pared despejada. (\(error))"
         }
+    }
+
+    /// Marca el objeto que está bajo la mira, con un radio aproximado.
+    func markObject(radius: Float) {
+        guard let target = crosshairTarget() else {
+            noiseResult = "Apunta la mira al objeto (donde ya se ve la malla) y vuelve a marcar."
+            return
+        }
+        objectMark = ObjectMark(center: target, radius: radius)
+        noiseResult = nil
+    }
+
+    /// Punto 3D (mundo) bajo la mira, sobre la malla o un plano estimado.
+    private func crosshairTarget() -> SIMD3<Float>? {
+        let center = CGPoint(x: sceneView.bounds.midX, y: sceneView.bounds.midY)
+        guard let query = sceneView.raycastQuery(from: center, allowing: .estimatedPlane, alignment: .any),
+              let hit = sceneView.session.raycast(query).first else { return nil }
+        let t = hit.worldTransform.columns.3
+        return SIMD3<Float>(t.x, t.y, t.z)
     }
 }

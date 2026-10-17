@@ -8,15 +8,45 @@ import Domain
 // ═══════════════════════════════════════════════════════════════════════════════
 
 struct MeshViewer: View {
-    @State private var scene: SCNScene
+    let mesh: Mesh
+    /// Caja de medición (alineada con la gravedad), dibujada translúcida.
+    var region: OrientedBox?
+    // La escena se arma una sola vez: el padre se redibuja con cada deslizador.
+    @State private var scene: SCNScene?
 
-    init(mesh: Mesh) {
-        _scene = State(initialValue: Self.makeScene(mesh))
+    init(mesh: Mesh, region: OrientedBox? = nil) {
+        self.mesh = mesh
+        self.region = region
     }
 
     var body: some View {
-        SceneView(scene: scene, pointOfView: scene.rootNode.childNode(withName: "camera", recursively: false),
-                  options: [.allowsCameraControl, .autoenablesDefaultLighting])
+        if let scene {
+            SceneView(scene: scene, pointOfView: scene.rootNode.childNode(withName: "camera", recursively: false),
+                      options: [.allowsCameraControl, .autoenablesDefaultLighting])
+                .onChange(of: region) { Self.show(region, in: scene) }
+        } else {
+            Color.clear.onAppear {
+                let made = Self.makeScene(mesh)
+                Self.show(region, in: made)
+                scene = made
+            }
+        }
+    }
+
+    private static func show(_ region: OrientedBox?, in scene: SCNScene) {
+        scene.rootNode.childNode(withName: "region", recursively: false)?.removeFromParentNode()
+        guard let region else { return }
+        let d = region.dimensions
+        let box = SCNBox(width: CGFloat(d.x), height: CGFloat(d.y), length: CGFloat(d.z), chamferRadius: 0)
+        let material = SCNMaterial()
+        material.diffuse.contents = UIColor.systemOrange.withAlphaComponent(0.25)
+        material.isDoubleSided = true
+        material.writesToDepthBuffer = false
+        box.materials = [material]
+        let node = SCNNode(geometry: box)
+        node.name = "region"
+        node.position = SCNVector3(region.center.x, region.center.y, region.center.z)
+        scene.rootNode.addChildNode(node)
     }
 
     /// Malla de dominio → escena SceneKit con la cámara encuadrada sobre ella.

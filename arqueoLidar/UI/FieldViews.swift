@@ -1,5 +1,6 @@
 import SwiftUI
 import Domain
+import Volume
 
 // ═══════════════════════════════════════════════════════════════════════════════
 // Flujo de terreno: sitios → hallazgos del sitio → ficha del hallazgo → escanear
@@ -430,6 +431,7 @@ struct ScanDetailView: View {
     @State private var exported: [URL] = []
     @State private var problems: [String] = []
     @State private var exporting = false
+    @State private var volumes: [VolumeMeasurement] = []
 
     var body: some View {
         List {
@@ -447,6 +449,23 @@ struct ScanDetailView: View {
                 .listRowInsets(EdgeInsets())
             } footer: {
                 Text(stats.isEmpty ? "Arrastra para girar, pellizca para acercar." : "\(stats). Arrastra para girar, pellizca para acercar.")
+            }
+
+            Section {
+                ForEach(volumes, id: \.measurementID) { saved in
+                    ForEach(saved.measurements, id: \.measurementID) { VolumeMeasurementRow(measurement: $0) }
+                }
+                if let mesh {
+                    NavigationLink {
+                        VolumeMeasureView(entry: entry, finding: finding, mesh: mesh) { reloadVolumes() }
+                    } label: {
+                        Label("Medir volumen", systemImage: "cube.transparent")
+                    }
+                }
+            } header: {
+                Text("Volumen")
+            } footer: {
+                Text("MEDIDO: sale directo de la malla escaneada. INFERIDO: la app tuvo que suponer una parte que no se ve (la base apoyada en el suelo o la superficie original de un daño). No presente un valor inferido como medido.")
             }
 
             Section("Ubicación") {
@@ -478,6 +497,11 @@ struct ScanDetailView: View {
         }
         .navigationTitle(entry.scan.purpose.label)
         .task { await load() }
+        .onAppear(perform: reloadVolumes)
+    }
+
+    private func reloadVolumes() {
+        volumes = FieldStore.measurements(of: entry, finding: finding)
     }
 
     private func load() async {

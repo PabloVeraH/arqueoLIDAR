@@ -99,6 +99,7 @@ struct CaptureView: View {
             Text("Reconstrucción: \(controller.reconstructionText)")
             Text("Temperatura: \(controller.thermalText) · Disco libre: \(controller.freeDiskText)")
             Text(location.statusText)
+            Text(markText)
         }
         .font(.caption.monospacedDigit())
         .padding(10)
@@ -119,6 +120,14 @@ struct CaptureView: View {
                 controller.measureSurfaceNoise()
             } label: {
                 Label("Medir ruido", systemImage: "scope")
+                    .frame(maxWidth: .infinity)
+            }
+            Menu {
+                ForEach([0.25, 0.5, 1, 2] as [Float], id: \.self) { r in
+                    Button("Radio \(radiusText(r))") { controller.markObject(radius: r) }
+                }
+            } label: {
+                Label("Marcar", systemImage: "scope.badge.plus")
                     .frame(maxWidth: .infinity)
             }
             Button {
@@ -153,6 +162,11 @@ struct CaptureView: View {
                     Text("Se guarda la serie completa de lecturas GPS. Si la mejor precisión supera ±10 m, el escaneo queda marcado como «GPS degradado».")
                 }
                 Section {
+                    Text(markText)
+                } footer: {
+                    Text("Para medir el volumen después, apunta la mira al objeto y toca «Marcar». Escanea solo el objeto y una franja de suelo alrededor: todo lo que la cámara vea entra en la malla.")
+                }
+                Section {
                     Text("Se guardarán \(controller.vertexCount.formatted()) vértices de \(controller.anchorCount) anclas, fusionados en una sola malla.")
                         .font(.footnote)
                         .foregroundStyle(.secondary)
@@ -176,14 +190,25 @@ struct CaptureView: View {
         .interactiveDismissDisabled(isSaving)
     }
 
+    private var markText: String {
+        controller.objectMark.map { "Objeto marcado · radio \(radiusText($0.radius))" }
+            ?? "Objeto sin marcar (apunta la mira y toca «Marcar»)"
+    }
+
+    private func radiusText(_ r: Float) -> String {
+        r < 1 ? "\(Int((r * 100).rounded())) cm" : "\(Int(r)) m"
+    }
+
     private func save() {
         let parts = controller.collectParts()
         let fixes = location.fixes
+        let mark = controller.objectMark
         isSaving = true
         controller.pause()
         Task {
             do {
-                let result = try await FieldStore.saveScan(parts: parts, fixes: fixes, purpose: purpose, finding: finding)
+                let result = try await FieldStore.saveScan(parts: parts, fixes: fixes, purpose: purpose,
+                                                         mark: mark, finding: finding)
                 location.stop()
                 showSaveForm = false
                 try? await Task.sleep(for: .milliseconds(400))
