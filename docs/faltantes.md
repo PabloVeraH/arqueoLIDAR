@@ -61,7 +61,7 @@ en la app y `tools/verify_chain.py`.
 - [~] **Prueba con un tercero** (Fase 17): preparada. `tools/preparar_prueba_tercero.py`
   arma los tres expedientes (uno alterado, con autocomprobación) y
   `docs/prueba_tercero.md` es la guía para quien la dirige. Falta hacerla con una
-  persona real (M13). Original:: persona ajena verifica solo con `VERIFY.txt` y
+  persona real (M13). Criterio:: persona ajena verifica solo con `VERIFY.txt` y
   distingue un bundle manipulado entre tres.
 - `rfc3161Token` queda vacío por diseño (sin red). No es pendiente de v1.
 
