@@ -38,7 +38,10 @@ en la app y `tools/verify_chain.py`.
 - [~] **Sellar antes / después de una intervención** (2026-10-17): botón «Sellar estado
   actual» en la ficha del hallazgo. Guarda `notes/NOTE-….json` (momento + nota) y lo
   sella con Face ID y el GPS del momento. Aparece en el historial. Falta probarlo (M10).
-- [ ] **Reemplazar un escaneo** (`supersedes`): el modelo lo admite, la app no lo ofrece.
+- [~] **Reemplazar un escaneo** (2026-10-17): «Reemplazar este escaneo» en la ficha del
+  escaneo abre la captura. El nuevo lleva `supersedes` y un motivo obligatorio
+  (`supersedesReason`). El anterior sigue sellado y se marca "Reemplazado por…". Falta
+  probarlo (M11).
 - [~] **Custodia entendible para el usuario** (2026-10-17): los errores de verificación
   ahora se leen como frases claras (`CustodyText`), con el detalle técnico plegado, y
   la ficha del hallazgo tiene un historial de sellos (`SealHistory`). Falta compilar y

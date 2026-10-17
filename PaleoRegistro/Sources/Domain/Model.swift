@@ -130,6 +130,8 @@ public struct ScanSession: Sendable, Codable, Equatable {
     public var purpose: ScanPurpose
     public var parentScanID: UUID?
     public var supersedes: UUID?
+    /// Por qué este escaneo reemplaza al anterior (el anterior no se borra).
+    public var supersedesReason: String?
     public var capturedAt: Date
     public var captureParameters: CaptureParameters
     public var georeferenceQuality: GeoreferenceQuality
@@ -151,7 +153,8 @@ public struct ScanSession: Sendable, Codable, Equatable {
         siteAlignment: Matrix4x4 = Matrix4x4.identity,
         sealed: Bool = false,
         sealedAt: Date? = nil,
-        objectMark: ObjectMark? = nil
+        objectMark: ObjectMark? = nil,
+        supersedesReason: String? = nil
     ) {
         self.scanID = scanID
         self.findingID = findingID
@@ -165,6 +168,7 @@ public struct ScanSession: Sendable, Codable, Equatable {
         self.sealed = sealed
         self.sealedAt = sealedAt
         self.objectMark = objectMark
+        self.supersedesReason = supersedesReason
     }
 }
 

@@ -40,6 +40,8 @@ Sitios → Hallazgos del sitio → Ficha del hallazgo → Escaneo → Visor 3D y
 - Al guardar se elige el **propósito** (registro inicial, monitoreo, evaluación de daño, rescate…) y el escaneo se **sella**. Antes de guardar, el iPhone pide **Face ID o su código**: la firma se hace con una clave guardada en el **chip seguro** del teléfono, que no se puede copiar. Si se cancela Face ID, no se guarda nada y el escaneo sigue en pantalla para volver a intentarlo. Si el GPS fue malo, queda marcado "GPS degradado" o "Sin GPS".
 - Si el iPhone no tiene código configurado, igual se sella, pero con una clave común (sin chip seguro). La pantalla final y el propio sello lo indican, porque esa firma prueba menos.
 
+- Si un escaneo salió mal, en su ficha se toca **"Reemplazar este escaneo"** y se hace uno nuevo, con un motivo obligatorio. El escaneo malo **no se borra**: sigue sellado y queda marcado "Reemplazado por…". Es como tachar con una línea en la libreta de campo y anotar al lado.
+
 ### 4. Visor 3D
 
 - El escaneo guardado se puede **ver en 3D**: girar con un dedo y acercar con dos. Muestra también su ubicación y precisión.

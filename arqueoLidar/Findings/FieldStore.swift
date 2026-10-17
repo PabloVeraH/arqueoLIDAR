@@ -124,7 +124,8 @@ nonisolated enum FieldStore {
     /// Fusiona los trozos de malla de ARKit, guarda el escaneo con la serie GPS
     /// completa y sella el expediente (nuevo eslabón en seals/chain.jsonl).
     static func saveScan(parts: [MeshPart], fixes: [GeoFix], purpose: ScanPurpose,
-                         mark: ObjectMark?, finding: Finding) async throws -> SavedScan {
+                         mark: ObjectMark?, finding: Finding,
+                         replacing: ScanEntry? = nil, reason: String? = nil) async throws -> SavedScan {
         let merged = MeshMergerCore().merge(parts: parts)
         guard !merged.isEmpty else {
             throw FieldError("No hay malla para guardar. Recorre la zona con la cámara hasta ver el wireframe.")
@@ -136,7 +137,9 @@ nonisolated enum FieldStore {
 
         let verdict = FixQualityGate().evaluate(burst: fixes)
         let scan = ScanSession(findingID: finding.findingID, purpose: purpose,
-                               georeferenceQuality: verdict.quality, objectMark: mark)
+                               supersedes: replacing?.scan.scanID,
+                               georeferenceQuality: verdict.quality, objectMark: mark,
+                               supersedesReason: replacing == nil ? nil : reason)
 
         let scanDir = try writer.createScanDir(scan, findingID: finding.findingID)
         try writer.writeMesh(mesh, to: scanDir)
@@ -155,6 +158,20 @@ nonisolated enum FieldStore {
                          meshURL: scanDir.appendingPathComponent("mesh.ply"),
                          vertexCount: mesh.vertices.count, triangleCount: mesh.triangleCount,
                          rootHash: seal.rootHash, keyProtection: key.protection)
+    }
+
+    /// "Reemplazado por …" / "Reemplaza al …: motivo", o nil si no aplica.
+    static func replacementText(_ entry: ScanEntry, among scans: [ScanEntry]) -> String? {
+        func when(_ e: ScanEntry) -> String { e.scan.capturedAt.formatted(date: .abbreviated, time: .shortened) }
+        if let newer = scans.first(where: { $0.scan.supersedes == entry.scan.scanID }) {
+            return "Reemplazado por el escaneo del \(when(newer)) (sigue sellado)"
+        }
+        if let id = entry.scan.supersedes {
+            let older = scans.first { $0.scan.scanID == id }.map { "del \(when($0))" } ?? "anterior"
+            let reason = entry.scan.supersedesReason.map { ": \($0)" } ?? ""
+            return "Reemplaza al escaneo \(older)\(reason)"
+        }
+        return nil
     }
 
     static func loadMesh(_ entry: ScanEntry) throws -> Mesh {

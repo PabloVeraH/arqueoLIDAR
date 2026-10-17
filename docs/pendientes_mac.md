@@ -151,6 +151,15 @@ es aquí). En el iPhone, en un hallazgo con escaneos:
 4. Cancelar Face ID → no queda `notes/NOTE-….json` suelto; el expediente sigue Íntegro.
 **Bien si:** todo lo anterior.
 
+### M11 · 2026-10-17 · punto 4 de custodia · Reemplazar un escaneo
+Compila (`CaptureView(finding:replacing:)`, `ScanSession.supersedesReason`). En el iPhone:
+1. Ficha de un escaneo → «Reemplazar este escaneo» → captura → el formulario muestra
+   "Reemplaza a …" y no deja guardar sin motivo; el propósito viene igual al original.
+2. Tras guardar, en la lista del hallazgo el original dice "Reemplazado por el escaneo
+   del … (sigue sellado)" y el nuevo "Reemplaza al escaneo del …: <motivo>".
+3. El original ya no ofrece reemplazarse otra vez; Verificar → Íntegro.
+**Bien si:** todo lo anterior.
+
 ## Resueltas
 
 _(vacío)_

@@ -367,6 +367,9 @@ struct FindingDetailView: View {
                             Text("\(entry.scan.capturedAt.formatted(date: .abbreviated, time: .shortened)) · \(entry.scan.georeferenceQuality.label)\(entry.isSealed ? " · sellado" : "")")
                                 .font(.caption)
                                 .foregroundStyle(.secondary)
+                            if let line = FieldStore.replacementText(entry, among: scans) {
+                                Text(line).font(.caption).foregroundStyle(.orange)
+                            }
                         }
                     }
                 }
@@ -478,6 +481,10 @@ struct ScanDetailView: View {
     @State private var problems: [String] = []
     @State private var exporting = false
     @State private var volumes: [VolumeMeasurement] = []
+    @State private var siblings: [ScanEntry] = []
+    @State private var showReplace = false
+
+    private var isReplaced: Bool { siblings.contains { $0.scan.supersedes == entry.scan.scanID } }
 
     var body: some View {
         List {
@@ -514,6 +521,22 @@ struct ScanDetailView: View {
                 Text("MEDIDO: sale directo de la malla escaneada. INFERIDO: la app tuvo que suponer una parte que no se ve (la base apoyada en el suelo o la superficie original de un daño). No presente un valor inferido como medido.")
             }
 
+            Section {
+                if let line = FieldStore.replacementText(entry, among: siblings) {
+                    Text(line).foregroundStyle(.orange)
+                }
+                Button {
+                    showReplace = true
+                } label: {
+                    Label("Reemplazar este escaneo", systemImage: "arrow.triangle.2.circlepath.camera")
+                }
+                .disabled(isReplaced)
+            } header: {
+                Text("Reemplazo")
+            } footer: {
+                Text("Si este escaneo salió mal, haz uno nuevo que lo reemplace. Este no se borra: la evidencia sellada se conserva y el nuevo declara a cuál reemplaza y por qué.")
+            }
+
             Section("Ubicación") {
                 if let fix = FieldStore.representativeFix(FieldStore.fixes(entry)) {
                     LabeledContent("Latitud", value: fix.latitude.formatted(.number.precision(.fractionLength(6))))
@@ -544,10 +567,14 @@ struct ScanDetailView: View {
         .navigationTitle(entry.scan.purpose.label)
         .task { await load() }
         .onAppear(perform: reloadVolumes)
+        .fullScreenCover(isPresented: $showReplace, onDismiss: reloadVolumes) {
+            CaptureView(finding: finding, replacing: entry)
+        }
     }
 
     private func reloadVolumes() {
         volumes = FieldStore.measurements(of: entry, finding: finding)
+        siblings = FieldStore.scans(of: finding)
     }
 
     private func load() async {

@@ -9,6 +9,8 @@ import Domain
 
 struct CaptureView: View {
     let finding: Finding
+    /// Escaneo sellado que este reemplaza (no se borra: el nuevo lo declara).
+    var replacing: ScanEntry? = nil
     @Environment(\.dismiss) private var dismiss
     @State private var controller = ScanController()
     @State private var location = LocationRecorder()
@@ -18,6 +20,7 @@ struct CaptureView: View {
     @State private var isSaving = false
     @State private var saved: SavedScan?
     @State private var errorText: String?
+    @State private var reason = ""
 
     var body: some View {
         ZStack {
@@ -55,6 +58,9 @@ struct CaptureView: View {
             }
             .padding()
             .accessibilityLabel("Cerrar")
+        }
+        .onAppear {
+            if let replacing { purpose = replacing.scan.purpose }
         }
         .task {
             controller.start()
@@ -148,6 +154,14 @@ struct CaptureView: View {
     private var saveForm: some View {
         NavigationStack {
             Form {
+                if let replacing {
+                    Section {
+                        LabeledContent("Reemplaza a", value: "\(replacing.scan.purpose.label), \(replacing.scan.capturedAt.formatted(date: .abbreviated, time: .shortened))")
+                        TextField("Motivo (ej. el primero quedó incompleto)", text: $reason, axis: .vertical)
+                    } footer: {
+                        Text("El escaneo anterior no se borra: sigue sellado y queda marcado como reemplazado por este.")
+                    }
+                }
                 Section {
                     LabeledContent("Hallazgo", value: finding.title)
                     Picker("Propósito", selection: $purpose) {
@@ -183,6 +197,7 @@ struct CaptureView: View {
                         ProgressView()
                     } else {
                         Button("Guardar y sellar") { save() }
+                            .disabled(replacing != nil && reason.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty)
                     }
                 }
             }
@@ -208,7 +223,8 @@ struct CaptureView: View {
         Task {
             do {
                 let result = try await FieldStore.saveScan(parts: parts, fixes: fixes, purpose: purpose,
-                                                         mark: mark, finding: finding)
+                                                         mark: mark, finding: finding, replacing: replacing,
+                                                         reason: reason.trimmingCharacters(in: .whitespacesAndNewlines))
                 location.stop()
                 showSaveForm = false
                 try? await Task.sleep(for: .milliseconds(400))
