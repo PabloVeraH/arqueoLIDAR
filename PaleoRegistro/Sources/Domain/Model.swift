@@ -132,6 +132,12 @@ public struct ScanSession: Sendable, Codable, Equatable {
     public var supersedes: UUID?
     /// Por qué este escaneo reemplaza al anterior (el anterior no se borra).
     public var supersedesReason: String?
+    /// Marco de sitio con norte verdadero, si se pudo resolver; `siteAlignment`
+    /// lleva entonces la matriz marco AR → sitio (+X Este, +Y arriba, −Z Norte).
+    public var siteFrame: SiteFrame?
+    public var northMethod: NorthMethod?
+    /// Por qué no hay norte verdadero, en palabras (nil si lo hay).
+    public var northNote: String?
     public var capturedAt: Date
     public var captureParameters: CaptureParameters
     public var georeferenceQuality: GeoreferenceQuality
@@ -154,7 +160,10 @@ public struct ScanSession: Sendable, Codable, Equatable {
         sealed: Bool = false,
         sealedAt: Date? = nil,
         objectMark: ObjectMark? = nil,
-        supersedesReason: String? = nil
+        supersedesReason: String? = nil,
+        siteFrame: SiteFrame? = nil,
+        northMethod: NorthMethod? = nil,
+        northNote: String? = nil
     ) {
         self.scanID = scanID
         self.findingID = findingID
@@ -169,6 +178,34 @@ public struct ScanSession: Sendable, Codable, Equatable {
         self.sealedAt = sealedAt
         self.objectMark = objectMark
         self.supersedesReason = supersedesReason
+        self.siteFrame = siteFrame
+        self.northMethod = northMethod
+        self.northNote = northNote
+    }
+}
+
+/// Cómo se obtuvo el norte verdadero de un escaneo.
+public enum NorthMethod: String, Sendable, Codable {
+    /// Recorrido de la cámara contra la traza GPS (TrackYawSolver).
+    case gpsTrack
+    /// Dos o más puntos de coordenada conocida (topógrafo, GNSS diferencial).
+    case controlPoints
+}
+
+/// Punto físico marcado con la mira durante la captura, cuya coordenada entrega
+/// un topógrafo (GNSS diferencial, ±2 cm). Con dos o más, el escaneo queda con
+/// norte verdadero y ubicación de precisión topográfica.
+public struct ControlPoint: Sendable, Codable, Equatable {
+    public var label: String
+    /// Dónde está en el marco de mundo de la captura (+Y arriba).
+    public var arPosition: SIMD3<Float>
+    /// Coordenada entregada por el topógrafo (`source = .manual`).
+    public var fix: GeoFix
+
+    public init(label: String, arPosition: SIMD3<Float>, fix: GeoFix) {
+        self.label = label
+        self.arPosition = arPosition
+        self.fix = fix
     }
 }
 

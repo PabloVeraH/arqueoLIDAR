@@ -33,6 +33,8 @@ final class ScanController {
 
     /// Objeto marcado con la mira: caja inicial para medir el volumen después.
     private(set) var objectMark: ObjectMark?
+    /// Puntos de coordenada conocida marcados con la mira (topógrafo).
+    private(set) var controlPoints: [ControlPoint] = []
 
     // Calidad de la sesión (F15): se guarda con el escaneo (quality.json,
     // trajectory.json). La trayectoria sirve además para el norte verdadero.
@@ -94,6 +96,7 @@ final class ScanController {
         isRunning = true
         noiseResult = nil
         objectMark = nil // las coordenadas del mundo anterior ya no valen
+        controlPoints = []
         trajectory = []
         pathLength = 0
         sessionStart = Date()
@@ -254,6 +257,19 @@ final class ScanController {
             }
         }
         return total > 0 ? Float(low) / Float(total) : nil
+    }
+
+    /// Punto bajo la mira, o nil con el aviso en pantalla.
+    func pointUnderCrosshair() -> SIMD3<Float>? {
+        guard let target = crosshairTarget() else {
+            noiseResult = "Apunta la mira a la marca del topógrafo (donde ya se ve la malla) y vuelve a intentar."
+            return nil
+        }
+        return target
+    }
+
+    func addControlPoint(label: String, at position: SIMD3<Float>, fix: GeoFix) {
+        controlPoints.append(ControlPoint(label: label, arPosition: position, fix: fix))
     }
 
     /// Marca el objeto que está bajo la mira, con un radio aproximado.

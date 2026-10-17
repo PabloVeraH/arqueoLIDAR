@@ -43,6 +43,7 @@ nonisolated struct CaptureRecord: Sendable {
     let purpose: ScanPurpose
     let mark: ObjectMark?
     let trajectory: [CameraSample]
+    let controlPoints: [ControlPoint]
     let quality: QualityReport
 }
 
@@ -146,10 +147,14 @@ nonisolated enum FieldStore {
                         normals: MeshOps().computeVertexNormals(merged).map(vecNormalize))
 
         let verdict = FixQualityGate().evaluate(burst: fixes)
+        let north = resolveNorth(capture)
         let scan = ScanSession(findingID: finding.findingID, purpose: capture.purpose,
                                supersedes: replacing?.scan.scanID,
-                               georeferenceQuality: verdict.quality, objectMark: capture.mark,
-                               supersedesReason: replacing == nil ? nil : reason)
+                               // Con puntos de control la ubicación es la del topógrafo, no la del teléfono.
+                               georeferenceQuality: capture.controlPoints.isEmpty ? verdict.quality : .good,
+                               siteAlignment: north.matrix, objectMark: capture.mark,
+                               supersedesReason: replacing == nil ? nil : reason,
+                               siteFrame: north.frame, northMethod: north.method, northNote: north.note)
 
         let scanDir = try writer.createScanDir(scan, findingID: finding.findingID)
         try writer.writeMesh(mesh, to: scanDir)
@@ -161,6 +166,10 @@ nonisolated enum FieldStore {
             .write(to: scanDir.appendingPathComponent("trajectory.json"), options: .atomic)
         try CanonicalJSONEncoder().encode(capture.quality)
             .write(to: scanDir.appendingPathComponent("quality.json"), options: .atomic)
+        if !capture.controlPoints.isEmpty {
+            try CanonicalJSONEncoder().encode(capture.controlPoints)
+                .write(to: scanDir.appendingPathComponent("control_points.json"), options: .atomic)
+        }
 
         // `.sealed` se escribe ANTES de sellar para que quede dentro del manifiesto:
         // Hasher solo excluye el `.sealed` de la raíz del bundle, no el de cada
@@ -168,11 +177,63 @@ nonisolated enum FieldStore {
         try writer.markSealed(scanDir: scanDir)
 
         let dir = findingDir(finding)
-        let seal = try await sealAndRecord(finding, adding: [scanDir], key: key, geo: representativeFix(fixes))
+        let seal = try await sealAndRecord(finding, adding: [scanDir], key: key,
+                                           geo: capture.controlPoints.first?.fix ?? representativeFix(fixes))
         return SavedScan(scanID: scan.scanID, title: finding.title, folder: dir,
                          meshURL: scanDir.appendingPathComponent("mesh.ply"),
                          vertexCount: mesh.vertices.count, triangleCount: mesh.triangleCount,
                          rootHash: seal.rootHash, keyProtection: key.protection)
+    }
+
+    /// Norte verdadero: con 2+ puntos de control, por ellos; si no, por el
+    /// recorrido de la cámara contra el GPS. Si no se puede, dice por qué en
+    /// palabras (queda en scan.json como `northNote`).
+    static func resolveNorth(_ capture: CaptureRecord)
+        -> (frame: SiteFrame?, matrix: Matrix4x4, method: NorthMethod?, note: String?) {
+        func why(_ error: Error) -> String {
+            switch error as? GeoError {
+            case .degenerateTrack(let detail): detail
+            case .noFixAvailable, .fixQualityInsufficient: "no hubo GPS de buena calidad"
+            default: "\(error)"
+            }
+        }
+        if capture.controlPoints.count >= 2 {
+            do {
+                let r = try ControlPointAligner().resolve(capture.controlPoints)
+                return (r.frame, r.arWorldToSite, .controlPoints, nil)
+            } catch {
+                return (nil, .identity, nil, "Los puntos de control no alcanzan para el norte (\(why(error))).")
+            }
+        }
+        let track = capture.trajectory.map {
+            (time: $0.time, transform: Matrix4x4(translation: $0.position, quaternion: Quatf(vector: .zero, scalar: 1)))
+        }
+        do {
+            let r = try SiteFrameResolver().resolve(cameraTrack: track, fixes: capture.fixes, magneticHeading: nil)
+            return (r.frame, r.arWorldToSite, .gpsTrack, nil)
+        } catch {
+            return (nil, .identity, nil,
+                    "Sin norte verdadero (\(why(error))). Para tenerlo, camina al menos 10 m al aire libre mientras escaneas, o marca 2 puntos de control del topógrafo.")
+        }
+    }
+
+    /// Coordenada UTM (WGS84, hemisferio sur) entregada por un topógrafo, como fijación manual.
+    static func controlPointFix(easting: Double, northing: Double, height: Double,
+                                zone: Int, accuracy: Double) throws -> GeoFix {
+        let utm = try UTMCoordinate(easting: easting, northing: northing, ellipsoidalHeight: height, zone: zone,
+                                    isNorthernHemisphere: false, epsg: 32700 + zone, datum: "WGS84")
+        let geo = try UTMConverter().toGeodetic(utm)
+        return try GeoFix(latitude: geo.lat, longitude: geo.lon, altitude: geo.h, horizontalAccuracy: accuracy,
+                          verticalAccuracy: accuracy, timestamp: Date(), source: .manual)
+    }
+
+    static func controlPoints(_ entry: ScanEntry) -> [ControlPoint] {
+        load([ControlPoint].self, from: entry.dir.appendingPathComponent("control_points.json")) ?? []
+    }
+
+    /// Ubicación del escaneo: el primer punto de control si lo hay (±cm), si no el GPS.
+    static func location(_ entry: ScanEntry) -> GeoFix? {
+        controlPoints(entry).first?.fix ?? representativeFix(fixes(entry))
     }
 
     /// "Reemplazado por …" / "Reemplaza al …: motivo", o nil si no aplica.
@@ -343,7 +404,7 @@ nonisolated enum FieldStore {
     /// Un formato que falla no detiene a los demás: se informa en `problems`.
     static func export(_ entry: ScanEntry, finding: Finding) throws -> (files: [URL], problems: [String]) {
         let mesh = try loadMesh(entry)
-        let utm = representativeFix(fixes(entry)).flatMap {
+        let utm = location(entry).flatMap {
             try? UTMConverter().toUTM(latitude: $0.latitude, longitude: $0.longitude, height: $0.altitude)
         }
         let meta = ExportMetadata(finding: finding, scan: entry.scan, utm: utm, scaleUnits: nil)

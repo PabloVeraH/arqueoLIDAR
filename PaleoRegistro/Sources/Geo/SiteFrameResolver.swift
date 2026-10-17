@@ -70,24 +70,19 @@ public struct SiteFrameResolver: SiteFrameResolving, Sendable {
         //    Marco AR: +X derecha, +Y arriba, +Z hacia atrás (right-handed, gravity).
         //    Marco de sitio: +X Este, +Y Arriba, -Z Norte.
         //    Yaw = rotación alrededor de Y (arriba) desde +X AR hacia el Este verdadero.
-        let cosY = cos(yaw)
-        let sinY = sin(yaw)
+        return (frame: frame, arWorldToSite: Self.rotation(yaw: yaw))
+    }
 
-        // Rotación: columnas de la matriz de rotación 3x3.
-        // Columna X: hacia dónde apunta +X AR en marco de sitio (Este rotado por yaw).
-        // Columna Y: arriba (igual).
-        // Columna Z: hacia dónde apunta +Z AR en marco de sitio (rotado por yaw).
-        let r00 = cosY;  let r02 = sinY   // +X AR → (cosY, 0, sinY) en ENU
-        let r20 = -sinY; let r22 = cosY   // +Z AR → (−sinY, 0, cosY) en ENU
-        // Nota: +Z AR = forward (into screen) = −Z ENU = Sur. Ajustamos signo.
-
-        let arWorldToSite = Matrix4x4(
-            SIMD4(r00, 0, r20, 0),
+    /// Rotación alrededor de +Y que lleva el marco AR al de sitio para un yaw de
+    /// TrackYawSolver.horn: un punto AR (x, y, z) queda en (E, y, −N) con
+    /// (E, N) = R(yaw)·(x, −z). La usa también ControlPointAligner.
+    static func rotation(yaw: Float) -> Matrix4x4 {
+        let cosY = cos(yaw), sinY = sin(yaw)
+        return Matrix4x4(
+            SIMD4(cosY, 0, -sinY, 0),
             SIMD4(0, 1, 0, 0),
-            SIMD4(r02, 0, r22, 0),
+            SIMD4(sinY, 0, cosY, 0),
             SIMD4(0, 0, 0, 1)
         )
-
-        return (frame: frame, arWorldToSite: arWorldToSite)
     }
 }

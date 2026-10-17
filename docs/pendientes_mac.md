@@ -206,6 +206,20 @@ CustodyTests). Compila; riesgos: `ScanController.lowConfidenceFraction` (CVPixel
 4. El HUD muestra tiempo y recorrido; pasado el límite, aparece el aviso.
 **Bien si:** todo lo anterior. Anota tiempos y umbrales observados en `registro_pruebas.md`.
 
+### M16 · 2026-10-17 · Norte verdadero y puntos de control
+`swift test` (ControlPointAlignerTests en GeoTests; las de TrackYawSolver deben seguir
+verdes tras extraer `horn` y `localEN`). Compila; riesgos: `GeoViews.swift`, el menú
+«Herramientas» de `CaptureView` (Menu dentro de Menu) y `FieldStore.resolveNorth`.
+En el iPhone:
+1. Al aire libre, escanea caminando 15–20 m → ficha del escaneo: "Norte verdadero ±x°,
+   por recorrido y GPS". Bajo techo: aparece la nota de por qué no hay norte.
+2. Con dos marcas a 3 m o más entre sí y sus UTM (si no hay topógrafo, prueba con dos
+   puntos medidos con otro GPS y anota que es una prueba): «Herramientas → Punto de
+   control» en cada una → la ficha dice "por puntos de control" y "Fuente: Punto de
+   control (topógrafo)". Exporta GeoJSON y revisa que la coordenada sea la del punto.
+3. Anota el σ del norte obtenido con cada método en `registro_pruebas.md`.
+**Bien si:** los dos métodos dan norte y la nota aparece cuando no se puede.
+
 ## Resueltas
 
 _(vacío)_

@@ -21,6 +21,7 @@ struct CaptureView: View {
     @State private var saved: SavedScan?
     @State private var errorText: String?
     @State private var reason = ""
+    @State private var controlTarget: IdentifiedPoint?
 
     var body: some View {
         ZStack {
@@ -83,6 +84,11 @@ struct CaptureView: View {
             location.stop()
         }
         .sheet(isPresented: $showSaveForm) { saveForm }
+        .sheet(item: $controlTarget) { target in
+            ControlPointForm(number: controller.controlPoints.count + 1) { label, fix in
+                controller.addControlPoint(label: label, at: target.position, fix: fix)
+            }
+        }
         .sheet(item: $saved) { scan in SavedScanView(scan: scan) { saved = nil; dismiss() } }
         .alert("No se pudo guardar", isPresented: Binding(get: { errorText != nil }, set: { if !$0 { errorText = nil } })) {
             Button("OK", role: .cancel) {}
@@ -114,6 +120,9 @@ struct CaptureView: View {
             Text("Temperatura: \(controller.thermalText) · Disco libre: \(controller.freeDiskText)")
             Text(location.statusText)
             Text(markText)
+            if !controller.controlPoints.isEmpty {
+                Text("Puntos de control: \(controller.controlPoints.map(\.label).joined(separator: ", "))")
+            }
             Text("Tiempo: \(Int(Date().timeIntervalSince(controller.sessionStart) / 60)) min · Recorrido: \(Int(controller.pathLength)) m")
         }
         .font(.caption.monospacedDigit())
@@ -131,18 +140,18 @@ struct CaptureView: View {
                 Label("Reiniciar", systemImage: "arrow.counterclockwise")
                     .frame(maxWidth: .infinity)
             }
-            Button {
-                controller.measureSurfaceNoise()
-            } label: {
-                Label("Medir ruido", systemImage: "scope")
-                    .frame(maxWidth: .infinity)
-            }
             Menu {
-                ForEach([0.25, 0.5, 1, 2] as [Float], id: \.self) { r in
-                    Button("Radio \(radiusText(r))") { controller.markObject(radius: r) }
+                Menu("Marcar objeto bajo la mira") {
+                    ForEach([0.25, 0.5, 1, 2] as [Float], id: \.self) { r in
+                        Button("Radio \(radiusText(r))") { controller.markObject(radius: r) }
+                    }
                 }
+                Button("Punto de control (topógrafo)…") {
+                    if let target = controller.pointUnderCrosshair() { controlTarget = IdentifiedPoint(position: target) }
+                }
+                Button("Medir ruido del sensor") { controller.measureSurfaceNoise() }
             } label: {
-                Label("Marcar", systemImage: "scope.badge.plus")
+                Label("Herramientas", systemImage: "scope")
                     .frame(maxWidth: .infinity)
             }
             Button {
@@ -244,6 +253,7 @@ struct CaptureView: View {
     private func save() {
         let capture = CaptureRecord(parts: controller.collectParts(), fixes: location.fixes, purpose: purpose,
                                     mark: controller.objectMark, trajectory: controller.trajectory,
+                                    controlPoints: controller.controlPoints,
                                     quality: controller.qualityReport())
         isSaving = true
         controller.pause()

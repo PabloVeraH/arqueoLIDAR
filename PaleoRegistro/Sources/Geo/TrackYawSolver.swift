@@ -57,17 +57,7 @@ public struct TrackYawSolver: Sendable {
 
         // 2. Convertir fixes GPS a EN local (origen = primer fix).
         guard let origin = fixes.first else { throw .degenerateTrack("sin fijaciones GPS") }
-        let cosLat0 = cos(Float(origin.latitude) * .pi / 180.0)
-        let mPerDegLat: Float = 111_320.0
-        let mPerDegLon: Float = mPerDegLat * cosLat0
-
-        var gpsPoints: [SIMD2<Float>] = []
-        gpsPoints.reserveCapacity(fixes.count)
-        for fix in fixes {
-            let dLat = Float(fix.latitude - origin.latitude) * mPerDegLat
-            let dLon = Float(fix.longitude - origin.longitude) * mPerDegLon
-            gpsPoints.append(SIMD2<Float>(dLon, dLat)) // EN: x=Este, y=Norte
-        }
+        let gpsPoints = fixes.map { Self.localEN($0, origin: origin) }
 
         // 3. Correspondencia por tiempo: para cada punto AR, interpolar GPS más cercano en tiempo.
         let gpsEpochs = fixes.map { $0.timestamp.timeIntervalSince1970 }
@@ -99,7 +89,27 @@ public struct TrackYawSolver: Sendable {
             throw .degenerateTrack("pocas correspondencias AR↔GPS (\(pairs.count))")
         }
 
-        // 4. Horn 2D (closed-form): yaw = ángulo que minimiza Σ|R(θ)·p_AR − p_GPS|²
+        // 4. Horn 2D sobre las correspondencias.
+        return try Self.horn(pairs)
+    }
+
+    /// Este/Norte local (m) de una fijación respecto de `origin`
+    /// (equirectangular: error despreciable en las decenas de metros de un sitio).
+    static func localEN(_ fix: GeoFix, origin: GeoFix) -> SIMD2<Float> {
+        let cosLat0 = cos(Float(origin.latitude) * .pi / 180.0)
+        let mPerDegLat: Float = 111_320.0
+        let mPerDegLon: Float = mPerDegLat * cosLat0
+        let dLat = Float(fix.latitude - origin.latitude) * mPerDegLat
+        let dLon = Float(fix.longitude - origin.longitude) * mPerDegLon
+        return SIMD2<Float>(dLon, dLat) // EN: x=Este, y=Norte
+    }
+
+    /// Horn 2D: yaw que lleva los puntos AR (x, −z) sobre los EN, más sigma
+    /// (residuo RMS / radio medio). Compartido con ControlPointAligner para que
+    /// ambos métodos usen la misma convención de signo.
+    static func horn(_ pairs: [(SIMD2<Float>, SIMD2<Float>)]) throws(GeoError) -> (yaw: Float, sigma: Float) {
+        guard pairs.count >= 2 else { throw .degenerateTrack("se necesitan al menos 2 correspondencias") }
+        // Horn 2D (closed-form): yaw = ángulo que minimiza Σ|R(θ)·p_AR − p_GPS|²
         // Solución: tan(θ) = (Σ cross) / (Σ dot) tras centrar ambas nubes.
         let arCentroid: SIMD2<Float> = pairs.reduce(.zero) { $0 + $1.0 } / Float(pairs.count)
         let gpsCentroid: SIMD2<Float> = pairs.reduce(.zero) { $0 + $1.1 } / Float(pairs.count)

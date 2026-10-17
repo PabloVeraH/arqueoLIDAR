@@ -486,3 +486,46 @@ struct GPSIsolationTests {
         #expect(absurdFix.latitude == 0)
     }
 }
+@Suite("F8 Geo: puntos de control del topógrafo")
+struct ControlPointAlignerTests {
+
+    let lat0 = -22.893015, lon0 = -69.319865
+
+    /// Punto de control con coordenada exacta: el sitio en EN = R(yaw)·(x, −z) del punto AR.
+    func point(_ label: String, ar: SIMD3<Float>, yaw: Float) throws -> ControlPoint {
+        let e = cos(yaw) * ar.x - sin(yaw) * (-ar.z)
+        let n = sin(yaw) * ar.x + cos(yaw) * (-ar.z)
+        let lat = lat0 + Double(n) / 111_320
+        let lon = lon0 + Double(e) / (111_320 * Double(cos(Float(lat0) * .pi / 180)))
+        let fix = try GeoFix(latitude: lat, longitude: lon, altitude: 1200 + Double(ar.y),
+                             horizontalAccuracy: 0.02, verticalAccuracy: 0.03,
+                             timestamp: Date(timeIntervalSince1970: 1_700_000_000), source: .manual)
+        return ControlPoint(label: label, arPosition: ar, fix: fix)
+    }
+
+    @Test("Dos puntos: recupera el yaw, y el primer punto queda en el origen del sitio")
+    func twoPointsRecoverYawAndOrigin() throws {
+        let yaw: Float = 30 * .pi / 180
+        let p1 = try point("PC-1", ar: SIMD3(0.5, -1.2, 2.0), yaw: yaw)
+        let p2 = try point("PC-2", ar: SIMD3(6.5, -1.0, -3.0), yaw: yaw)
+        let (frame, m) = try ControlPointAligner().resolve([p1, p2])
+        #expect(abs(frame.yawFromTrueNorth - yaw) < 0.2 * .pi / 180, "yaw \(frame.yawFromTrueNorth * 180 / .pi)°")
+        #expect(vecLength(m.applyAffine(p1.arPosition)) < 0.001)
+        // El segundo punto cae en (Este, arriba, −Norte) relativo al primero.
+        let site = m.applyAffine(p2.arPosition)
+        let d = p2.arPosition - p1.arPosition
+        let e = cos(yaw) * d.x - sin(yaw) * (-d.z), n = sin(yaw) * d.x + cos(yaw) * (-d.z)
+        #expect(vecLength(site - SIMD3(e, d.y, -n)) < 0.02, "\(site)")
+        // ±2 cm sobre ~7,8 m de base: menos de medio grado.
+        #expect(frame.yawSigma > 0 && frame.yawSigma < 0.5 * .pi / 180)
+        #expect(frame.origin.epsg == 32719)
+    }
+
+    @Test("Puntos muy juntos o uno solo: se niega a dar norte")
+    func refusesShortBaseline() throws {
+        let p1 = try point("PC-1", ar: SIMD3(0, 0, 0), yaw: 0)
+        let p2 = try point("PC-2", ar: SIMD3(0.4, 0, 0), yaw: 0)
+        #expect(throws: GeoError.self) { try ControlPointAligner().resolve([p1, p2]) }
+        #expect(throws: GeoError.self) { try ControlPointAligner().resolve([p1]) }
+    }
+}

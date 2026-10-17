@@ -86,10 +86,21 @@ Solo se ejercitan en Diagnóstico (`ModuleSelfTests.swift`):
 
 ## 3. Georreferencia
 
-- [ ] **Norte verdadero**: `TrackYawSolver` existe, pero la captura no guarda la
-  trayectoria de la cámara.
-- [ ] **Punto de control de topógrafo**: `SiteFrameResolver` sin conectar.
-- [ ] **Orientación del sitio**: el sitio guarda el punto GPS, no su orientación.
+- [~] **Norte verdadero por recorrido** (2026-10-17): la captura guarda la trayectoria de la
+  cámara (`trajectory.json`). Al guardar, `SiteFrameResolver` alinea el recorrido con la
+  traza GPS y deja `siteFrame`, `northMethod` y `siteAlignment` en `scan.json`. Si no
+  puede (recorrido corto, sin GPS), `northNote` dice por qué y cómo lograrlo.
+- [~] **Puntos de control del topógrafo**: «Herramientas → Punto de control» en la
+  captura: se apunta la mira a la marca y se ingresa su UTM. Con 2 o más,
+  `ControlPointAligner` da el norte (la misma alineación de Horn) y el origen en el primer
+  punto. Ese punto pasa a ser la ubicación del escaneo (±cm) en la ficha, el sello y las
+  exportaciones.
+- [x] **Orientación del sitio**: no aplica como dato aparte. Cada captura tiene su propio
+  marco AR, así que la orientación vive en cada escaneo (`siteFrame`). El sitio conserva
+  su punto GPS de referencia.
+- [ ] Exportar en el marco de sitio (rotado al norte, en UTM): hoy los archivos 3D salen en
+  el marco de la captura, con la UTM en la ficha técnica.
+- Falta compilar y probar en el iPhone (M16).
 
 ## 4. Visor 3D completo (Fase 13)
 

@@ -564,13 +564,26 @@ struct ScanDetailView: View {
                 }
             }
 
-            Section("Ubicación") {
-                if let fix = FieldStore.representativeFix(FieldStore.fixes(entry)) {
+            Section {
+                if let fix = FieldStore.location(entry) {
                     LabeledContent("Latitud", value: fix.latitude.formatted(.number.precision(.fractionLength(6))))
                     LabeledContent("Longitud", value: fix.longitude.formatted(.number.precision(.fractionLength(6))))
-                    LabeledContent("Precisión", value: "±\(fix.horizontalAccuracy.formatted(.number.precision(.fractionLength(1)))) m")
+                    LabeledContent("Precisión", value: fix.horizontalAccuracy < 1
+                                   ? "±\(Int((fix.horizontalAccuracy * 100).rounded())) cm"
+                                   : "±\(fix.horizontalAccuracy.formatted(.number.precision(.fractionLength(1)))) m")
+                    LabeledContent("Fuente", value: fix.source == .manual ? "Punto de control (topógrafo)" : "GPS del iPhone")
                 }
                 LabeledContent("Calidad", value: entry.scan.georeferenceQuality.label)
+                if let frame = entry.scan.siteFrame {
+                    LabeledContent("Norte verdadero",
+                                   value: "±\((frame.yawSigma * 180 / .pi).formatted(.number.precision(.fractionLength(1))))°, \(entry.scan.northMethod == .controlPoints ? "por puntos de control" : "por recorrido y GPS")")
+                } else if let note = entry.scan.northNote {
+                    Text(note).font(.caption).foregroundStyle(.orange)
+                }
+            } header: {
+                Text("Ubicación y orientación")
+            } footer: {
+                Text("El norte verdadero orienta el modelo 3D respecto del terreno: hace falta para la dirección de los estratos y para comparar campañas.")
             }
 
             Section {
