@@ -104,10 +104,19 @@ Solo se ejercitan en Diagnóstico (`ModuleSelfTests.swift`):
 
 ## 4. Visor 3D completo (Fase 13)
 
-- [ ] Campo de color (confianza, distancia del diff, estrato) con leyenda y unidades.
-- [ ] Superposición de plano y cajas orientadas.
-- [ ] Picking (tocar la malla → punto 3D), base de las mediciones manuales.
-- [ ] Decimación automática sobre 1 M de triángulos, avisando que es versión simplificada.
+- [~] **Tocar la malla** (2026-10-17): el visor devuelve el punto 3D tocado (hit test sobre
+  la malla, ignorando caja y plano). En Medir volumen, tocar lleva la caja a ese punto.
+- [~] **Campo de color con leyenda y unidades**: "Colorear por altura" en la ficha del
+  escaneo, y distancia a la referencia en Medir volumen. La escala va del percentil 2 al
+  98 (`ScalarRange.robust`) y la leyenda dice qué % queda fuera de escala, para que los
+  extremos no saturen sin aviso.
+- [~] **Plano de referencia y caja** dibujados en el visor tras calcular un volumen.
+- [~] **Simplificación sobre 1 M de triángulos** solo para mirar (`decimateForDisplay`), con
+  aviso en pantalla; las mediciones usan la malla completa.
+- [ ] Colores por diferencia entre campañas y por estrato: dependen de las pantallas de
+  monitoreo y estratigrafía (sección 2).
+- [ ] Cajas orientadas por espécimen: depende de la pantalla de especímenes.
+- Falta compilar y probar en el iPhone (M17), sobre todo la fluidez con mallas grandes.
 
 ## 5. Expediente e informe
 

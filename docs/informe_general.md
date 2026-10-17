@@ -50,6 +50,9 @@ Sitios → Hallazgos del sitio → Ficha del hallazgo → Escaneo → Visor 3D y
 ### 4. Visor 3D
 
 - El escaneo guardado se puede **ver en 3D**: girar con un dedo y acercar con dos. Muestra también su ubicación y precisión.
+- **"Colorear por altura"** pinta el modelo de azul (bajo) a rojo (alto), con una leyenda en centímetros. Si unos pocos puntos son muy extremos, quedan fuera de la escala y la leyenda dice qué porcentaje.
+- En **Medir volumen**, tocar el modelo lleva la caja a ese punto. Después de calcular se ven el plano de referencia (en verde) y los colores según cuánto sobresale o falta cada punto respecto de ese plano.
+- Si el modelo es muy grande, para verlo con fluidez se muestra una versión simplificada y se avisa. Las mediciones siempre usan el modelo completo.
 
 ### 5. Volumen
 

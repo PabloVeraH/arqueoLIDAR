@@ -520,3 +520,34 @@ struct PLYCodecTests {
         #expect(decoded.normals == nil)
     }
 }
+@Suite("F13 Mesh: apoyo del visor")
+struct ViewerSupportTests {
+
+    @Test("Escala robusta: los extremos no aplastan la escala y se cuentan como fuera de ella")
+    func robustRangeCountsClipped() {
+        var values = (0..<100).map { Float($0) / 100 }   // 0,00 … 0,99 m
+        values += [25, -30]                                // dos puntos espurios
+        let r = ScalarRange.robust(values)
+        #expect(r.low >= 0 && r.high <= 1, "\(r)")
+        #expect(r.belowCount >= 1 && r.aboveCount >= 1)
+        #expect(r.clippedFraction > 0 && r.clippedFraction < 0.1)
+        #expect(r.normalized(25) == 1 && r.normalized(-30) == 0)
+    }
+
+    @Test("Campo constante o vacío no rompe la escala")
+    func degenerateRanges() {
+        #expect(ScalarRange.robust([]).total == 0)
+        let flat = ScalarRange.robust([2, 2, 2])
+        #expect(flat.normalized(2) == 0.5)
+    }
+
+    @Test("Malla grande se simplifica solo bajo el máximo; una chica queda igual")
+    func decimateForDisplay() {
+        let big = SyntheticMeshes.cube(center: .zero, size: 1, divisions: 40)
+        let (shown, simplified) = MeshOps().decimateForDisplay(big, maxTriangles: big.triangleCount / 4)
+        #expect(simplified)
+        #expect(shown.triangleCount <= big.triangleCount / 4)
+        let (same, untouched) = MeshOps().decimateForDisplay(big, maxTriangles: big.triangleCount)
+        #expect(!untouched && same.triangleCount == big.triangleCount)
+    }
+}

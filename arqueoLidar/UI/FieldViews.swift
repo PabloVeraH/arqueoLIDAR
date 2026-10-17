@@ -494,6 +494,11 @@ struct ScanDetailView: View {
     @State private var exporting = false
     @State private var volumes: [VolumeMeasurement] = []
     @State private var siblings: [ScanEntry] = []
+    @State private var colorByHeight = false
+
+    /// +Y es la vertical en el marco de la captura: la altura no depende del norte.
+    static let heightColoring = ScalarColoring(id: "altura", title: "Altura sobre el punto más bajo",
+                                               scale: 100, unit: "cm", relative: true, value: { $0.y })
     @State private var showReplace = false
 
     private var isReplaced: Bool { siblings.contains { $0.scan.supersedes == entry.scan.scanID } }
@@ -503,7 +508,7 @@ struct ScanDetailView: View {
             Section {
                 ZStack {
                     if let mesh {
-                        MeshViewer(mesh: mesh)
+                        MeshViewer(mesh: mesh, coloring: colorByHeight ? Self.heightColoring : nil)
                     } else if let loadError {
                         Text(loadError).foregroundStyle(.red)
                     } else {
@@ -512,6 +517,7 @@ struct ScanDetailView: View {
                 }
                 .frame(height: 360)
                 .listRowInsets(EdgeInsets())
+                Toggle("Colorear por altura", isOn: $colorByHeight)
             } footer: {
                 Text(stats.isEmpty ? "Arrastra para girar, pellizca para acercar." : "\(stats). Arrastra para girar, pellizca para acercar.")
             }

@@ -220,6 +220,19 @@ En el iPhone:
 3. Anota el σ del norte obtenido con cada método en `registro_pruebas.md`.
 **Bien si:** los dos métodos dan norte y la nota aparece cuando no se puede.
 
+### M17 · 2026-10-17 · Visor 3D: tocar, colores, plano, simplificación
+`swift test` (ViewerSupportTests en MeshTests). Compila; riesgos en
+`Rendering/MeshViewer.swift`: `SceneContainer` (UIViewRepresentable con
+`UITapGestureRecognizer` y `@objc` en el Coordinator), `SCNGeometrySource` de colores
+(stride de `SIMD4<Float>`), `simd_quatf(from:to:)` del plano. En el iPhone:
+1. Ficha de un escaneo → "Colorear por altura": se pinta de azul a rojo, la leyenda
+   muestra cm y el % fuera de escala. Girar y acercar sigue funcionando.
+2. Medir volumen → tocar el objeto: la caja salta ahí. Calcular: aparecen el plano verde y
+   los colores por distancia a la referencia.
+3. Un escaneo grande (o varios minutos de captura): ¿aparece "Versión simplificada"? ¿Se
+   puede girar con fluidez? Anota triángulos y sensación de fluidez.
+**Bien si:** todo lo anterior.
+
 ## Resueltas
 
 _(vacío)_

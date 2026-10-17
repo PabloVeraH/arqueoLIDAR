@@ -95,13 +95,15 @@ struct VolumeMeasureView: View {
     var body: some View {
         List {
             Section {
-                MeshViewer(mesh: mesh, region: region)
+                MeshViewer(mesh: mesh, region: region, plane: result?.reference,
+                           coloring: referenceColoring, onPick: { center = $0 })
                     .frame(height: 300)
                     .listRowInsets(EdgeInsets())
             } footer: {
-                Text(entry.scan.objectMark == nil
-                     ? "Este escaneo no tiene objeto marcado: la caja parte cubriendo todo. Achícala hasta el objeto, con una franja de suelo (o de superficie sana) alrededor."
-                     : "La caja parte en el objeto marcado al capturar. Debe incluir una franja de suelo (o de superficie sana) alrededor: ahí se ajusta la referencia.")
+                Text((entry.scan.objectMark == nil
+                      ? "Este escaneo no tiene objeto marcado: la caja parte cubriendo todo. Achícala hasta el objeto, con una franja de suelo (o de superficie sana) alrededor."
+                      : "La caja parte en el objeto marcado al capturar. Debe incluir una franja de suelo (o de superficie sana) alrededor: ahí se ajusta la referencia.")
+                     + " Toca el modelo para llevar la caja a ese punto. Al calcular, el plano verde es la referencia usada.")
             }
 
             Section("Posición") {
@@ -147,6 +149,14 @@ struct VolumeMeasureView: View {
         .navigationBarTitleDisplayMode(.inline)
         // Mover la caja invalida el resultado anterior.
         .onChange(of: region) { result = nil }
+    }
+
+    /// Tras calcular: cuánto sobresale o falta cada punto respecto de la referencia.
+    private var referenceColoring: ScalarColoring? {
+        guard let result, let plane = result.reference else { return nil }
+        return ScalarColoring(id: "ref-\(result.measurementID)", title: "Distancia a la referencia (− bajo, + sobre)",
+                              scale: 100, unit: "cm", relative: false,
+                              value: { vecDot($0 - plane.point, plane.normal) })
     }
 
     private func maxSize(_ axis: WritableKeyPath<SIMD3<Float>, Float>) -> Float {
