@@ -170,3 +170,8 @@ Solo se ejercitan en Diagnóstico (`ModuleSelfTests.swift`):
 | 2026-10-17 | Sellar estado actual antes / después de intervenir | [~] sin compilar (M10) | 0190923 |
 | 2026-10-17 | Reemplazar un escaneo sin borrarlo | [~] sin compilar (M11) | e610b43 |
 | 2026-10-17 | Archivos sellados de solo lectura (WORM) | [~] sin compilar (M12) | 6277e84 |
+| 2026-10-17 | Prueba con un tercero preparada (script + guía) | [~] falta hacerla (M13) | 39142e5 |
+| 2026-10-17 | Protocolo de validación en terreno + resumen de bandas | [~] faltan las corridas (M14) | e6d0f4d |
+| 2026-10-17 | Robustez: calidad, interrupciones, sol, disco, recuperación | [~] sin compilar (M15) | e60f575 |
+| 2026-10-17 | Norte verdadero por recorrido y puntos de control | [~] sin compilar (M16) | 6bc32b2 |
+| 2026-10-17 | Visor: tocar, colores con leyenda, plano, simplificación | [~] sin compilar (M17) | 6746e06 |
