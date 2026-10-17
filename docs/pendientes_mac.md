@@ -172,6 +172,15 @@ permisos no se aplican y esa prueba falla: córrelos como usuario normal). En el
 4. Anota qué pasa si se intenta borrar el expediente desde la app Archivos.
 **Bien si:** 1–3 como se describe.
 
+### M13 · 2026-10-17 · Prueba de verificación por un tercero (Fase 17)
+Requiere haber hecho M8 y M9 (expedientes con `SHA256SUMS`, `verify_chain.py` y firma v3).
+Seguir `docs/prueba_tercero.md`: sellar 3 hallazgos distintos en el iPhone, copiarlos a
+la Mac, `python3 tools/preparar_prueba_tercero.py FND-… FND-… FND-…`, y hacer la prueba
+con una persona ajena al proyecto. Antes: `python3 tools/test_preparar_prueba_tercero.py`
+(4/4 en Windows).
+**Bien si:** la persona identifica el alterado en menos de 15 minutos, sin preguntar.
+Anota el resultado con la tabla de la guía en `registro_pruebas.md`.
+
 ## Resueltas
 
 _(vacío)_

@@ -286,6 +286,7 @@ La regla es que **cualquier número se pueda recalcular exactamente** a partir d
   - `verify_chain.py`: comprueba que el expediente no fue manipulado (`test_verify_chain.py` lo pone a prueba con expedientes adulterados a propósito).
   - `check_utm.py`: revisa las coordenadas.
   - `check_exports.py`: revisa que los archivos exportados estén bien formados.
+  - `preparar_prueba_tercero.py`: arma la prueba en la que una persona ajena verifica tres expedientes, uno alterado a propósito, solo con `VERIFY.txt` (guía en `docs/prueba_tercero.md`).
 - **`Scripts/check_module_boundaries.sh`**: una revisión interna de orden del código. No le afecta a usted.
 - **`Tests/`**: pruebas automáticas que comprueban que los cálculos dan lo esperado.
 - **Documentos:**
