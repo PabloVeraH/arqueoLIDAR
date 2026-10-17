@@ -1,5 +1,6 @@
 import SwiftUI
 import Domain
+import Custody
 import Volume
 
 // ═══════════════════════════════════════════════════════════════════════════════
@@ -340,6 +341,7 @@ struct NewFindingView: View {
 struct FindingDetailView: View {
     let finding: Finding
     @State private var scans: [ScanEntry] = []
+    @State private var history: [SealChange] = []
     @State private var showCapture = false
     @State private var verdict: CustodyVerdict?
     @State private var verifying = false
@@ -399,7 +401,15 @@ struct FindingDetailView: View {
                     case .invalid(let errors):
                         VStack(alignment: .leading, spacing: 4) {
                             Label("Problemas encontrados", systemImage: "xmark.seal.fill").foregroundStyle(.red)
-                            ForEach(Array(errors.enumerated()), id: \.offset) { Text("• " + String(describing: $0.element)).font(.caption) }
+                            ForEach(Array(errors.enumerated()), id: \.offset) {
+                                Text("• " + CustodyText.describe($0.element, scans: scans)).font(.caption)
+                            }
+                            DisclosureGroup("Detalle técnico (para peritaje)") {
+                                ForEach(Array(errors.enumerated()), id: \.offset) {
+                                    Text(String(describing: $0.element)).font(.caption2.monospaced()).textSelection(.enabled)
+                                }
+                            }
+                            .font(.caption)
                         }
                     }
                 }
@@ -407,6 +417,29 @@ struct FindingDetailView: View {
                 Text("Cadena de custodia")
             } footer: {
                 Text("Para verificarlo en una Mac sin la app: python3 tools/verify_chain.py <carpeta \(FieldStore.findingDir(finding).lastPathComponent)>")
+            }
+
+            if !history.isEmpty {
+                Section {
+                    ForEach(history.reversed(), id: \.seal.index) { change in
+                        VStack(alignment: .leading, spacing: 3) {
+                            Text("Sello N.º \(change.seal.index + 1) · \(change.seal.wallClock.formatted(date: .abbreviated, time: .shortened))")
+                                .font(.subheadline.weight(.semibold))
+                            ForEach(CustodyText.sealedItems(change, scans: scans), id: \.self) {
+                                Text($0).font(.caption)
+                            }
+                            Text(CustodyText.signature(change.seal)).font(.caption2).foregroundStyle(.secondary)
+                            if change.seal.previousKeyID != nil {
+                                Label("Cambio de clave declarado (otro iPhone o clave nueva)", systemImage: "key")
+                                    .font(.caption2).foregroundStyle(.orange)
+                            }
+                        }
+                    }
+                } header: {
+                    Text("Historial de sellos (\(history.count))")
+                } footer: {
+                    Text("Cada sello firma todo el expediente en ese momento y encadena con el anterior. La hora es la del teléfono al sellar. Este historial muestra lo que dice la cadena; para saber si alguien la alteró, use «Verificar expediente».")
+                }
             }
         }
         .navigationTitle(finding.title)
@@ -418,6 +451,7 @@ struct FindingDetailView: View {
 
     private func reload() {
         scans = FieldStore.scans(of: finding)
+        history = FieldStore.sealHistory(finding)
         verdict = nil
     }
 }

@@ -231,11 +231,13 @@ nonisolated enum FieldStore {
         if fm.fileExists(atPath: exports.path) { try fm.removeItem(at: exports) }
     }
 
+    /// Qué selló cada eslabón de la cadena, del primero al último.
+    static func sealHistory(_ finding: Finding) -> [SealChange] {
+        SealHistory.changes(SealHistory.read(bundleAt: findingDir(finding)))
+    }
+
     private static func lastSeal(_ findingDir: URL) -> SealRecord? {
-        let chain = findingDir.appendingPathComponent("seals/chain.jsonl")
-        guard let text = try? String(contentsOf: chain, encoding: .utf8),
-              let line = text.split(separator: "\n").last else { return nil }
-        return try? CanonicalDateCoding.decoder().decode(SealRecord.self, from: Data(line.utf8))
+        SealHistory.read(bundleAt: findingDir).last
     }
 
     // MARK: - Exportación
