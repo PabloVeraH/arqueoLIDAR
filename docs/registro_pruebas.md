@@ -6,6 +6,26 @@ Lo que no se probó se marca como pendiente, no como aprobado.
 
 ---
 
+## 2026-10-29 · Mac de Esteban (Xcode 27 beta, Swift 6) · compilación
+
+### Versión `d8627da` (trabajo de Pablo hasta `6c0b164` + 2 arreglos de compilación)
+
+| Prueba | Resultado |
+|---|---|
+| `swift build` del paquete, primer intento | ❌ `invalid redeclaration of 'QualityReport'` → arreglado en `270f267` |
+| `swift build`, segundo intento | ❌ `'Measurement' is ambiguous` en VolumeMeasurer.swift → arreglado en `d8627da` |
+| `swift test` | ✅ 193 pruebas en 12 grupos, todas en verde |
+| `python3 tools/test_verify_chain.py` | ✅ 12/12 |
+| `python3 tools/test_preparar_prueba_tercero.py` | ✅ 4/4 |
+| `python3 tools/test_validate_reference.py` | ✅ 7/7 |
+| `Scripts/check_module_boundaries.sh` + autotest | ✅ OK, 3/3 |
+| `xcodebuild` app, iOS genérico, sin firmar | ✅ BUILD SUCCEEDED; sin advertencias de concurrencia (las 9 que quedan son anteriores al 15-10) |
+| `verify_chain.py` dentro de `arqueoLidar.app` | ✅ |
+
+Pruebas en el iPhone (M1, M4, M6–M12, M15–M17): pendientes.
+
+---
+
 ## 2026-10-14 · iPhone de Esteban (iOS 27.2) · Xcode 27 beta
 
 ### Versión `5120d7c` (captura de Esteban, antes de integrar el flujo de Pablo)

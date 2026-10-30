@@ -21,6 +21,8 @@ números se anotan en `docs/registro_pruebas.md`; aquí solo se marca el estado.
 ## Pendientes
 
 ### M1 · 2026-10-15 · `d44ac6f`, `8825f72` · Sitios, borrado protegido y Diagnóstico solo en Debug
+
+> **2026-10-29 (Mac, `d8627da`):** el paquete compila y `swift test` pasa entero (193 pruebas, 12 grupos, incluidas las suites de esta tarea), y la app compila (`xcodebuild … CODE_SIGNING_ALLOWED=NO`). Falta solo la parte en el iPhone.
 Escrito en Windows, nunca compilado. Qué cambió: Terreno abre en `SitesListView`; se
 puede crear o editar un sitio (`SiteFormView`) con "Tomar ubicación con GPS"; un sitio se
 borra solo si no tiene hallazgos (`FieldStore.deleteSite`); `Site.location: GeoFix?`;
@@ -56,35 +58,14 @@ existe solo en `#if DEBUG`.
 
 **Bien si:** compila sin errores y los pasos a–j dan lo esperado.
 
-### M2 · 2026-10-17 · `3d63b17` · Compilar y testear la firma v2 (paquete)
-`cd PaleoRegistro && swift build && swift test`. Suite nueva: "F10 Custody: firma v2 y
-rotación de clave" (7 pruebas). Además `python3 tools/test_verify_chain.py` (necesita
-`pip install cryptography`).
-**Bien si:** todo en verde. Si algún test de custodia falla, revisa primero
-`SealPayload` (SealSigner.swift), que es el formato compartido con `verify_chain.py`.
-
-### M3 · 2026-10-17 · `fbe49da` · Compilar la app con SealingKeyStore
-`xcodebuild -project arqueoLidar.xcodeproj -scheme arqueoLidar -destination 'generic/platform=iOS' build`.
-Puntos de riesgo en `arqueoLidar/Findings/SealingKeyStore.swift`:
-`evaluateAccessControl` async, `SecureEnclave.P256.Signing.PrivateKey(accessControl:authenticationContext:)`,
-`@unchecked Sendable` en `SecureEnclaveSigningKey` y `ScanController.resume()`.
-**Bien si:** compila sin errores ni advertencias nuevas.
-
 ### M4 · 2026-10-17 · `fbe49da` · Probar la firma con chip seguro en el iPhone
+
+> **2026-10-29 (Mac, `d8627da`):** el paquete compila y `swift test` pasa entero (193 pruebas, 12 grupos, incluidas las suites de esta tarea), y la app compila (`xcodebuild … CODE_SIGNING_ALLOWED=NO`). Falta solo la parte en el iPhone.
 Seguir la lista "Pendiente: firma con chip seguro" de `docs/registro_pruebas.md`:
 pide Face ID; cancelar no pierde la malla ni deja carpetas sueltas; el código sirve de
 respaldo; un expediente antiguo (v1) + sello nuevo sigue Íntegro; `verify_chain.py` OK
 en la Mac; el simulador sella con "Clave de software".
 **Bien si:** todo da lo esperado. Anota el resultado en `registro_pruebas.md`.
-
-### M5 · 2026-10-17 · `c0f48bd`, `48c4570` · Compilar y testear el volumen
-`swift build && swift test` (suite "medición en la ficha (medido vs. inferido)", 6 pruebas).
-Si falla "Domo abierto…", revisa primero que `MeshCloser` deje estanca la combinación de
-domo y suelo; no relajes la etiqueta INFERIDO. Después compila la app con `xcodebuild`.
-Puntos de riesgo: `UI/VolumeViews.swift` (deslizadores con `WritableKeyPath` sobre
-`SIMD3<Float>`, el `switch` sobre `VolumeError?` en `message`), `MeshViewer` (ahora arma la
-escena en `onAppear`) y que los cuatro botones de la captura quepan en un iPhone angosto.
-**Bien si:** todo en verde y sin advertencias nuevas.
 
 ### M6 · 2026-10-17 · `48c4570` · Probar el volumen en el iPhone
 1. Captura de un objeto de medidas conocidas (una caja de cartón medida con huincha)
@@ -104,6 +85,8 @@ escena en `onAppear`) y que los cuatro botones de la captura quepan en un iPhone
 valores contra la huincha (esto alimenta la Fase 16).
 
 ### M7 · 2026-10-17 · `4989ca7`, `734b4de` · Custodia en palabras e historial de sellos
+
+> **2026-10-29 (Mac, `d8627da`):** el paquete compila y `swift test` pasa entero (193 pruebas, 12 grupos, incluidas las suites de esta tarea), y la app compila (`xcodebuild … CODE_SIGNING_ALLOWED=NO`). Falta solo la parte en el iPhone.
 `swift test` (suite "historial de sellos", 2 pruebas; las de custodia existentes deben
 seguir verdes con el nuevo `CustodyError.fileMissing`). Compila la app; punto de riesgo:
 `Findings/CustodyText.swift` (expresiones `switch`) y el `ForEach(history.reversed(), …)`
@@ -119,6 +102,8 @@ de `FindingDetailView`. En el iPhone:
 fuera del desplegable.
 
 ### M8 · 2026-10-17 · punto 1 de custodia · Verificación por un tercero sin la app
+
+> **2026-10-29 (Mac, `d8627da`):** el paquete compila y `swift test` pasa entero (193 pruebas, 12 grupos, incluidas las suites de esta tarea), y la app compila (`xcodebuild … CODE_SIGNING_ALLOWED=NO`). Falta solo la parte en el iPhone.
 Compila: `arqueoLidar/Resources/verify_chain.py` debe quedar dentro de la app (Xcode lo
 toma por la carpeta sincronizada; si no, agrégalo a "Copy Bundle Resources").
 `swift test` (2 pruebas nuevas en PersistenceTests). En el iPhone, sella un escaneo y
@@ -132,6 +117,8 @@ copia el expediente a la Mac. Ahí:
 quedó en la app.
 
 ### M9 · 2026-10-17 · punto 2 de custodia · Firma v3 y hora del GPS
+
+> **2026-10-29 (Mac, `d8627da`):** el paquete compila y `swift test` pasa entero (193 pruebas, 12 grupos, incluidas las suites de esta tarea), y la app compila (`xcodebuild … CODE_SIGNING_ALLOWED=NO`). Falta solo la parte en el iPhone.
 `swift test`: en CustodyTests cambian `sealProducesValidRecord` (ahora espera v3) y hay 2
 pruebas nuevas ("editar la lectura GPS…", "Un sello v2…"). `python3 tools/test_verify_chain.py`
 → 12/12. En el iPhone: sella un escaneo al aire libre, copia el expediente a la Mac y
@@ -141,6 +128,8 @@ revisa el último sello en `seals/chain.jsonl`: debe tener `"signatureVersion":3
 diferencia entre lo que se firma (`SealPayload.bytes`) y lo que escribe `appendSeal`.
 
 ### M10 · 2026-10-17 · punto 3 de custodia · Sellar antes / después de intervenir
+
+> **2026-10-29 (Mac, `d8627da`):** el paquete compila y `swift test` pasa entero (193 pruebas, 12 grupos, incluidas las suites de esta tarea), y la app compila (`xcodebuild … CODE_SIGNING_ALLOWED=NO`). Falta solo la parte en el iPhone.
 Compila `UI/CustodyViews.swift` y los `label` ahora `nonisolated` de `FieldStore.swift`
 (los usa `CustodyText`, que es `nonisolated`; si el compilador se queja de aislamiento,
 es aquí). En el iPhone, en un hallazgo con escaneos:
@@ -152,6 +141,8 @@ es aquí). En el iPhone, en un hallazgo con escaneos:
 **Bien si:** todo lo anterior.
 
 ### M11 · 2026-10-17 · punto 4 de custodia · Reemplazar un escaneo
+
+> **2026-10-29 (Mac, `d8627da`):** el paquete compila y `swift test` pasa entero (193 pruebas, 12 grupos, incluidas las suites de esta tarea), y la app compila (`xcodebuild … CODE_SIGNING_ALLOWED=NO`). Falta solo la parte en el iPhone.
 Compila (`CaptureView(finding:replacing:)`, `ScanSession.supersedesReason`). En el iPhone:
 1. Ficha de un escaneo → «Reemplazar este escaneo» → captura → el formulario muestra
    "Reemplaza a …" y no deja guardar sin motivo; el propósito viene igual al original.
@@ -161,6 +152,8 @@ Compila (`CaptureView(finding:replacing:)`, `ScanSession.supersedesReason`). En 
 **Bien si:** todo lo anterior.
 
 ### M12 · 2026-10-17 · punto 5 de custodia · Archivos sellados de solo lectura
+
+> **2026-10-29 (Mac, `d8627da`):** el paquete compila y `swift test` pasa entero (193 pruebas, 12 grupos, incluidas las suites de esta tarea), y la app compila (`xcodebuild … CODE_SIGNING_ALLOWED=NO`). Falta solo la parte en el iPhone.
 `swift test` (prueba "WORM…" en PersistenceTests; si corres los tests como root, los
 permisos no se aplican y esa prueba falla: córrelos como usuario normal). En el iPhone:
 1. Sella un escaneo, copia el expediente a la Mac y revisa con `ls -l` que `mesh.ply`
@@ -191,6 +184,8 @@ capas de arena, ensayo nulo, etc.), a la sombra y al sol, y anotar cada corrida 
 por magnitud y sube la planilla cada vez.
 
 ### M15 · 2026-10-17 · Robustez de la captura (Fase 15)
+
+> **2026-10-29 (Mac, `d8627da`):** el paquete compila y `swift test` pasa entero (193 pruebas, 12 grupos, incluidas las suites de esta tarea), y la app compila (`xcodebuild … CODE_SIGNING_ALLOWED=NO`). Falta solo la parte en el iPhone.
 `swift test` (QualityReportTests en DomainTests; "Lo que no alcanzó a sellarse…" en
 CustodyTests). Compila; riesgos: `ScanController.lowConfidenceFraction` (CVPixelBuffer),
 `WireframeRenderer.onInterruption` (callback de ARKit que salta al actor principal) y
@@ -207,6 +202,8 @@ CustodyTests). Compila; riesgos: `ScanController.lowConfidenceFraction` (CVPixel
 **Bien si:** todo lo anterior. Anota tiempos y umbrales observados en `registro_pruebas.md`.
 
 ### M16 · 2026-10-17 · Norte verdadero y puntos de control
+
+> **2026-10-29 (Mac, `d8627da`):** el paquete compila y `swift test` pasa entero (193 pruebas, 12 grupos, incluidas las suites de esta tarea), y la app compila (`xcodebuild … CODE_SIGNING_ALLOWED=NO`). Falta solo la parte en el iPhone.
 `swift test` (ControlPointAlignerTests en GeoTests; las de TrackYawSolver deben seguir
 verdes tras extraer `horn` y `localEN`). Compila; riesgos: `GeoViews.swift`, el menú
 «Herramientas» de `CaptureView` (Menu dentro de Menu) y `FieldStore.resolveNorth`.
@@ -221,6 +218,8 @@ En el iPhone:
 **Bien si:** los dos métodos dan norte y la nota aparece cuando no se puede.
 
 ### M17 · 2026-10-17 · Visor 3D: tocar, colores, plano, simplificación
+
+> **2026-10-29 (Mac, `d8627da`):** el paquete compila y `swift test` pasa entero (193 pruebas, 12 grupos, incluidas las suites de esta tarea), y la app compila (`xcodebuild … CODE_SIGNING_ALLOWED=NO`). Falta solo la parte en el iPhone.
 `swift test` (ViewerSupportTests en MeshTests). Compila; riesgos en
 `Rendering/MeshViewer.swift`: `SceneContainer` (UIViewRepresentable con
 `UITapGestureRecognizer` y `@objc` en el Coordinator), `SCNGeometrySource` de colores
@@ -235,4 +234,28 @@ En el iPhone:
 
 ## Resueltas
 
-_(vacío)_
+### ✅ M2 · 2026-10-17 · `3d63b17` · Compilar y testear la firma v2 (paquete)
+**2026-10-29 · Mac (Xcode 27 beta, Swift 6) · `d8627da`.** `swift build && swift test`:
+193 pruebas en 12 grupos, todas en verde (incluye "F10 Custody: firma v2 y rotación de
+clave", firma v3, historial de sellos, WORM y SHA256SUMS). `python3 tools/test_verify_chain.py`
+12/12, `tools/test_preparar_prueba_tercero.py` 4/4, `tools/test_validate_reference.py` 7/7,
+`Scripts/check_module_boundaries.sh` OK y su autotest 3/3.
+No compilaba a la primera: `invalid redeclaration of 'QualityReport'` (Contracts.swift
+tenía un borrador de F0 sin uso que chocaba con Quality.swift). Arreglo: `270f267`.
+
+### ✅ M3 · 2026-10-17 · `fbe49da` · Compilar la app con SealingKeyStore
+**2026-10-29 · `d8627da`.** `xcodebuild -scheme arqueoLidar -destination 'generic/platform=iOS'
+CODE_SIGNING_ALLOWED=NO build` → BUILD SUCCEEDED. Sin advertencias de concurrencia;
+las 9 advertencias que quedan (casts que siempre resultan, `var` que podría ser `let`) son
+anteriores al 2026-10-15. `verify_chain.py` queda dentro de `arqueoLidar.app` (M8).
+Sin firmar, `xcodebuild` falla por perfil ("No profiles for 'cl.mnh.arqueoLidar'"):
+para instalar en el iPhone se firma desde Xcode.
+
+### ✅ M5 · 2026-10-17 · `c0f48bd`, `48c4570` · Compilar y testear el volumen
+**2026-10-29 · `d8627da`.** Suite "medición en la ficha (medido vs. inferido)" en verde
+(dentro de las 193 pruebas del paquete). No compilaba: `'Measurement' is ambiguous for type lookup`
+(VolumeMeasurer.swift:29, choca `Foundation.Measurement` con `Domain.Measurement`), y por
+eso `VolumeMeasurement` no era Codable ni Equatable. Arreglo `d8627da`: `Domain.Measurement`
+en VolumeMeasurer.swift y VolumeViews.swift. Ninguna etiqueta INFERIDO/MEDIDO cambió.
+
+
