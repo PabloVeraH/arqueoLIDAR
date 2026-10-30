@@ -26,7 +26,7 @@ public struct VolumeMeasurement: Sendable, Codable, Equatable {
     public var reference: Plane?
     public var result: VolumeResult
     /// Lo que se informa; cada valor con su propio `isInferred`.
-    public var measurements: [Measurement]
+    public var measurements: [Domain.Measurement]
 
     public var isInferred: Bool { measurements.contains { $0.isInferred } }
 }
@@ -56,8 +56,8 @@ public enum VolumeMeasurer {
         let (rim, inner) = splitRim(roi.vertices, region: region)
 
         func volume(_ value: Double, _ label: String, inferred: Bool, _ result: VolumeResult,
-                    _ assumptions: [String]) -> Measurement {
-            Measurement(scanID: scanID, kind: .volume, value: value, unit: "m3",
+                    _ assumptions: [String]) -> Domain.Measurement {
+            Domain.Measurement(scanID: scanID, kind: .volume, value: value, unit: "m3",
                         method: "\(result.method.rawValue) \(result.algorithmVersion), medidor \(algorithmVersion)",
                         isInferred: inferred, uncertainty: result.uncertainty,
                         assumptions: assumptions, label: label)

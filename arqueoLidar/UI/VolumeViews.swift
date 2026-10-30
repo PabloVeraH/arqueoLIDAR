@@ -26,7 +26,7 @@ struct ProvenanceBadge: View {
 
 /// Un volumen con su etiqueta, supuestos y la advertencia de precisión.
 struct VolumeMeasurementRow: View {
-    let measurement: Measurement
+    let measurement: Domain.Measurement
 
     var body: some View {
         VStack(alignment: .leading, spacing: 6) {
