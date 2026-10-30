@@ -831,32 +831,3 @@ public enum ColorPalette: Sendable {
     case custom([SIMD4<UInt8>])
 }
 
-// MARK: - Quality / Diagnostics
-
-public struct QualityReport: Sendable, Codable, Equatable {
-    public var scanID: UUID
-    public var exceededDurationLimit: Bool
-    public var exceededAreaLimit: Bool
-    public var thermalDegraded: Bool
-    public var lowCoverage: Bool
-    public var directSunSaturation: Bool
-    public var notes: [String]
-
-    public init(
-        scanID: UUID,
-        exceededDurationLimit: Bool,
-        exceededAreaLimit: Bool,
-        thermalDegraded: Bool,
-        lowCoverage: Bool,
-        directSunSaturation: Bool,
-        notes: [String]
-    ) {
-        self.scanID = scanID
-        self.exceededDurationLimit = exceededDurationLimit
-        self.exceededAreaLimit = exceededAreaLimit
-        self.thermalDegraded = thermalDegraded
-        self.lowCoverage = lowCoverage
-        self.directSunSaturation = directSunSaturation
-        self.notes = notes
-    }
-}
